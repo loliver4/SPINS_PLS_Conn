@@ -1,0 +1,13 @@
+---
+title: "SPINS PLS Connectivity analyses"
+author: "Lindsay Oliver"
+date: "`r Sys.Date()`"
+output: bookdown::gitbook
+github-repo: https://github.com/loliver4/SPINS_PLS_Conn
+description: "EA rest PLS using connectivity and behaviour"
+fontsize: 10pt
+monofontoptions: "Scale=0.5"
+classoption: landscape
+---
+
+# The index page
