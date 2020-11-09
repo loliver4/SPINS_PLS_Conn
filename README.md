@@ -1,7 +1,7 @@
 SPINS PLS Connectivity
 ===============================================
 
-EA rest PLS using connectivity and behaviour
+EA and RS PLS using connectivity and behaviour
 
 Created by Lindsay Oliver lindsay.oliver@camh.ca
 
