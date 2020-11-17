@@ -5,26 +5,26 @@ EA and RS PLS using connectivity and behaviour
 
 Created by Lindsay Oliver lindsay.oliver@camh.ca
 
-**SEE STARTUP.MD FOR INSTRUCTIONS ON CREATING A GIT REPO**
+
 
 Project Organization
 -----------------------------------
 
     .
     ├── README.md          <- The top-level README
-    ├── .gitignore         <- Files to not upload to github - by default includes /data
-    ├── LICENSE            <- usage license if applicable
+    ├── .gitignore         <- Files to not upload to github - data, reports
     ├── data
-    │   ├── processed      <- The final dataset (can include subfolders etc)
-    │   └── raw            <- The original dataset, generally a link to minimally preprocessed data
+    │   ├── processed      <- The final data
+    │   └── raw            <- The original data
     │
-    ├── notebooks          <- Jupyter/R notebooks for analysis workflow - Naming should begin with a number, followed by an underscore and a description (e.g. 01_compile_demographics.Rmd)
+    ├── notebooks          <- R notebooks for analysis workflow - should be run in order
     │
     ├── docs/references    <- Data dictionaries, manuals, and all other explanatory materials
     │
     ├── reports            <- Generated analysis as HTML, PDF, LaTeX, etc.
     │   └── figures        <- Generated graphics and figures to be used in reporting
+    │   └── paper          <- Manuscript drafts and materials
     │
     ├── requirements.txt   <- The requirements file for reproducing the analysis environment (if applicable)
     │
-    ├── code/src           <- Source code for use in this project (virtual environments, bash scripts, etc)
+    ├── code               <- Source code for use in this project (bash scripts)
