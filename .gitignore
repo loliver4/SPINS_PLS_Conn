@@ -2,3 +2,8 @@
 /data/processed
 /data/raw
 /data
+
+#ignore reports
+/reports/figures
+/reports/paper
+/reports
