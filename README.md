@@ -25,6 +25,4 @@ Project Organization
     │   └── figures        <- Generated graphics and figures to be used in reporting
     │   └── paper          <- Manuscript drafts and materials
     │
-    ├── requirements.txt   <- The requirements file for reproducing the analysis environment (if applicable)
-    │
     ├── code               <- Source code for use in this project (bash scripts)
