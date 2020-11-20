@@ -1,0 +1,187 @@
+---
+title: "01_SPINS_data_cleaning"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r results='hide', message=F, warning=F}
+library(dplyr) 
+
+# read in final SPINS data
+spins_df <- read.csv("/projects/loliver/SPINS_PLS_Conn/data/raw/SPINSDataStorage_DATA_2020-10-16_1224.csv",stringsAsFactors = F)
+
+```
+
+```{r}
+# demographics data cleaning
+spins_df$site <- spins_df$redcap_data_access_group
+spins_df$diagnostic_group <- ifelse(spins_df$redcap_event_name == 'control_arm_1', 'control', 'case')
+spins_df$demo_sex <- ifelse(spins_df$demo_sex_birth == 1, 'female', 'male')
+
+# create scanner variable
+spins_df$scanner <- gsub("_....$", "", gsub("SPN01_", "", spins_df$record_id))
+```
+
+```{r}
+# change unknown/missing values to NAs
+spins_df$demo_ethnicity[spins_df$demo_ethnicity == 3] <- NA # ethnicity
+spins_df$demo_marital_status[spins_df$demo_marital_status == 6|spins_df$demo_marital_status == 9] <- NA # marital status
+spins_df$demo_eng_prim_lang[spins_df$demo_eng_prim_lang == 9] <- NA # eng primary lang
+spins_df$demo_siblings[spins_df$demo_siblings == 9] <- NA # siblings
+spins_df$demo_offspring[spins_df$demo_offspring == 9] <- NA # offspring
+spins_df$demo_spec_ed_self[spins_df$demo_spec_ed_self == 9] <- NA # special education
+spins_df$demo_highest_grade_self[spins_df$demo_highest_grade_self == 101] <- NA # education
+spins_df$demo_highest_grade_mom[spins_df$demo_highest_grade_mom == 101] <- NA # education mom
+spins_df$demo_highest_grade_dad[spins_df$demo_highest_grade_dad == 101] <- NA # education dad
+
+```
+
+```{r}
+# write out csv with termination explanations
+term_info <- spins_df[!is.na(spins_df$term_early_withdraw),c("record_id","diagnostic_group","term_early_withdraw","term_consent_withdraw","term_no_longer_elg","term_change_health","term_deceased_date","term_psych_withdraw","term_other_specify")]
+
+write.csv(term_info, '/projects/loliver/SPINS_PLS_Conn/data/processed/spins_termination_info_11-20-2020.csv', row.names = FALSE)
+
+```
+
+```{r}
+# social and non-social cognition data cleaning
+
+# collapse across sites for WTAR and soc cog variables of interest
+spins_df[spins_df$scanner=='MRC'|spins_df$scanner=='MRP',c('wtar_raw_score','wtar_std_score','scog_rmet_total','scog_rad_total',
+     'scog_iri_factor_perspective','scog_iri_factor_fantasy','scog_iri_factor_empathic_concern','scog_iri_factor_personal_distress',
+     'scog_er40_crt_columnqcrt_value','scog_er40_cr_columnpcr_value','scog_er40ang_columnv','scog_er40fear_columnw',
+     'scog_er40hap_columnx','scog_er40noe_columny','scog_er40sad_columnz','scog_tasit_p1_total','scog_tasit_p1_total_positive',
+     'scog_tasit_p1_total_negative','scog_tasit_p2_total','scog_tasit_p2_sin','scog_tasit_p2_sscar','scog_tasit_p2_psar',
+     'scog_tasit_p2_do','scog_tasit_p2_say','scog_tasit_p2_think','scog_tasit_p2_feel','scog_tasit_p3_total',
+     'scog_tasit_p3_lie','scog_tasit_p3_sar','scog_tasit_p3_do','scog_tasit_p3_say','scog_tasit_p3_think','scog_tasit_p3_feel')]  <- 
+     spins_df[spins_df$scanner=='MRC'|spins_df$scanner=='MRP',c('wtarsum_total','wtarsum_std','scog2_rmet_total','scog2_rad_total',
+     'scog2_iri_factor_perspective','scog2_iri_factor_fantasy','scog2_iri_factor_empathic_concern','scog2_iri_factor_personal_distress',
+     'scog2_er40_crt_columnqcrt_value','scog_er402_cr_columnpcr_value','scog2_er40ang_columnv','scog2_er40fear_columnw',
+     'scog2_er40hap_columnx','scog2_er40noe_columny','scog2_er40sad_columnz','scog2_tasit_p1_total','scog2_tasit_p1_total_positive',
+     'scog2_tasit_p1_total_negative','scog2_tasit_p2_total','scog2_tasit_p2_sin','scog2_tasit_p2_sscar','scog2_tasit_p2_psar',
+     'scog2_tasit_p2_do','scog2_tasit_p2_say','scog2_tasit_p2_think','scog2_tasit_p2_feel','scog2_tasit_p3_total',
+     'scog2_tasit_p3_lie','scog2_tasit_p3_sar','scog2_tasit_p3_do','scog2_tasit_p3_say','scog2_tasit_p3_think','scog2_tasit_p3_feel')]
+
+# calculate IRI total scores
+spins_df$scog_iri_total <- rowSums(spins_df[,c('scog_iri_factor_perspective', 'scog_iri_factor_fantasy', 'scog_iri_factor_empathic_concern', 'scog_iri_factor_personal_distress')], na.rm=TRUE)
+
+# reverse score ER-40 RT correct
+spins_df$scog_er40_crt <- spins_df$scog_er40_crt_columnqcrt_value*-1 # for CMH / ZHH
+
+```
+
+
+```{r}
+# rename variables
+spins_df <- spins_df %>% dplyr::rename(scog_iri_perspective = scog_iri_factor_perspective,
+  scog_iri_fantasy = scog_iri_factor_fantasy,
+  scog_iri_empathic_concern = scog_iri_factor_empathic_concern,
+  scog_iri_personal_distress = scog_iri_factor_personal_distress,
+  scog_er40_total = scog_er40_cr_columnpcr_value,
+  scog_er40_anger = scog_er40ang_columnv,
+  scog_er40_fear = scog_er40fear_columnw,
+  scog_er40_hap = scog_er40hap_columnx,
+  scog_er40_neutral = scog_er40noe_columny,
+  scog_er40_sad = scog_er40sad_columnz,
+  scog_tasit1_total = scog_tasit_p1_total,
+  scog_tasit1_pos = scog_tasit_p1_total_positive,
+  scog_tasit1_neg = scog_tasit_p1_total_negative,
+  scog_tasit2_total = scog_tasit_p2_total,
+  scog_tasit2_sinc = scog_tasit_p2_sin,
+  scog_tasit2_simpsar = scog_tasit_p2_sscar,
+  scog_tasit2_parsar = scog_tasit_p2_psar,
+  scog_tasit2_do = scog_tasit_p2_do,
+  scog_tasit2_say = scog_tasit_p2_say,
+  scog_tasit2_think = scog_tasit_p2_think,
+  scog_tasit2_feel = scog_tasit_p2_feel,
+  scog_tasit3_total = scog_tasit_p3_total,
+  scog_tasit3_lie = scog_tasit_p3_lie,
+  scog_tasit3_sar = scog_tasit_p3_sar,
+  scog_tasit3_do = scog_tasit_p3_do,
+  scog_tasit3_say = scog_tasit_p3_say,
+  scog_tasit3_think = scog_tasit_p3_think,
+  scog_tasit3_feel = scog_tasit_p3_feel)
+
+```
+
+```{r results='hide'}
+# Clinical and functional data cleaning
+
+# recode SSD disorder type
+as.character(spins_df$scid5_dis1_cat_scz_psyc)
+
+spins_df$scid5_SSD_disorder_type <- recode(spins_df$scid5_dis1_cat_scz_psyc, 
+  '1' = "Schizophrenia",
+  '2' = "Schizophreniform Disorder",
+  '3' = "Schizoaffective Disorder",
+  '4' = "Delusional Disorder",
+  '5' = "Brief Psychotic Disorder",
+  '6' = "Psychotic Disorder due to GMC",
+  '7' = "Substance-induced Psychotic Disorder",
+  '8' = "Psychotic Disorder NOS")
+spins_df[spins_df$diagnostic_group=="control","scid5_SSD_disorder_type"] <- NA
+
+# collapse across columns for those with and without regular employment for BSFS
+spins_df$bsfs_total <- rowSums(spins_df[,c('bsfs_sec_grandtotal1', 'bsfs_sec_grandtotal2')], na.rm=TRUE)
+spins_df[spins_df$bsfs_total == 0,'bsfs_total'] <- NA  # safe as there are no zeros in the orginal columns
+
+# SANS 2-factor solution as recommended by Dr. Buchanan (email March 6, 2017)
+# ref: Blanchard, J. J., & Cohen, A. S. (2005). The structure of negative symptoms within schizophrenia: implications for assessment. Schizophrenia bulletin, 32(2), 238-245.
+# ref: Strauss, G. P., Horan, W. P., Kirkpatrick, B., Fischer, B. A., Keller, W. R., Miski, P., Buchanan, R.W., Green, M.F., Carpenter, W. T. (2013). Deconstructing negative symptoms of schizophrenia. Journal of psychiatric research,47(6), 783-790.
+# Strauss suggests using the average, not the sum, when calculating the factor scores (excluding globals due to redundancy) because the 2 factors have different numbers of items, which artificially creates a significant within subject effect when you use the sum.
+
+# calculate new factor scores
+spins_df$sans_dim_exp <- rowSums(spins_df[,c('sans1_unchanging_expression','sans2_decreased_spont_mvt','sans3_expressive_gestures',
+  'sans4_poor_eye','sans5_non_responsivity','sans6_lack_inflection','sans8_poverty_speech','sans10_blocking','sans11_latency')], 
+  na.rm=TRUE) * NA^(rowSums(!is.na(spins_df[,c('sans1_unchanging_expression','sans2_decreased_spont_mvt','sans3_expressive_gestures',
+  'sans4_poor_eye','sans5_non_responsivity','sans6_lack_inflection','sans8_poverty_speech','sans10_blocking','sans11_latency')]))==0)
+
+# only using sans15_current_role_out as all outpatients (vs sans15b_current_role_in)
+spins_df$sans_dim_mot <- rowSums(spins_df[,c('sans13_grooming','sans15a_current_role_out','sans14_role_fn','sans16_anergia',
+  'sans19_anhedonia','sans20_sexual_interest','sans21_intimacy','sans18_asociality')], na.rm=TRUE) *  
+  NA^(rowSums(!is.na(spins_df[,c('sans13_grooming','sans15a_current_role_out','sans14_role_fn','sans16_anergia',
+  'sans19_anhedonia','sans20_sexual_interest','sans21_intimacy','sans18_asociality')]))==0)
+
+# turn factor scores into averages
+spins_df$sans_dim_exp_avg <- spins_df$sans_dim_exp/9 
+spins_df$sans_dim_mot_avg <- spins_df$sans_dim_mot/8
+spins_df[spins_df$diagnostic_group=="control","sans_dim_exp_avg"] <- NA
+spins_df[spins_df$diagnostic_group=="control","sans_dim_mot_avg"] <- NA
+
+```
+
+```{r}
+# make new df with variables of interest
+
+spins_df <- spins_df[,c("record_id","site","scanner","diagnostic_group","scid5_SSD_disorder_type","demo_sex","demo_age_study_entry",
+            "hand_laterality_quotient","demo_marital_status","demo_eng_prim_lang","demo_spec_ed_self","demo_highest_grade_self",
+            "term_early_withdraw","wtar_raw_score","wtar_std_score","scog_rmet_total","scog_er40_total","scog_er40_crt",
+            "scog_er40_anger","scog_er40_fear","scog_er40_hap","scog_er40_neutral","scog_er40_sad",
+            "scog_tasit1_total","scog_tasit1_pos","scog_tasit1_neg","scog_tasit2_total","scog_tasit2_sinc","scog_tasit2_simpsar","scog_tasit2_parsar",
+            "scog_tasit2_do","scog_tasit2_say","scog_tasit2_think","scog_tasit2_feel","scog_tasit3_total","scog_tasit3_lie","scog_tasit3_sar",
+            "scog_tasit3_do","scog_tasit3_say","scog_tasit3_think","scog_tasit3_feel","scog_rad_total",
+            "scog_iri_total","scog_iri_perspective","scog_iri_fantasy","scog_iri_empathic_concern","scog_iri_personal_distress",
+            "np_composite_tscore","np_domain_tscore_process_speed","np_domain_tscore_att_vigilance","np_domain_tscore_work_mem",
+            "np_domain_tscore_verbal_learning","np_domain_tscore_visual_learning","np_domain_tscore_reasoning_ps",
+            "np_domain_tscore_social_cog","np_tscore_tmt","np_tscore_bacsc","np_tscore_hvltr","np_tscore_wms_ss","np_tscore_umd_lns",
+            "np_tscore_nab","np_tscore_bvmtr","np_tscore_fluency_animals","np_tscore_cpt","np_tscore_msceit",
+            "bsfs_total","bsfs_sec1_total","bsfs_sec2_total","bsfs_sec3_total","bsfs_sec4_total","bsfs_sec5_total",
+            "bsfs_sec6_total","bsfs_sec7_y_total_7a","bsfs_sec7_n_total_7b","qls_total","qls20_empathy",
+            "qls_factor_interpersonal","qls_factor_instrumental_role","qls_factor_intrapsychic","qls_factor_comm_obj_activities",
+            "bprs_factor_total","bprs_factor_neg_symp","bprs_factor_pos_symp","bprs_factor_anxiety_depression","bprs_factor_activation",
+            "bprs_factor_hostility","sans_total_sc","sans_dim_mot_avg","sans_dim_exp_avg","sans_sub_affective_flat_blunt",
+            "sans_sub_alogia","sans_sub_avolition_apathy","sans_sub_asocial_anhedonia")]
+
+```
+
+```{r}
+# write out a new csv
+write.csv(spins_df, '/projects/loliver/SPINS_PLS_Conn/data/processed/spins_behav_data_full_11-20-2020.csv', row.names = FALSE)
+
+```
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
