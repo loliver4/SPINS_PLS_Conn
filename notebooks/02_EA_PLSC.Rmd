@@ -1,0 +1,576 @@
+---
+title: "02_EA_PLSC"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+library(splitstackshape)
+library(tidyverse)
+library(corrr)
+library(psych)
+library(TExPosition)
+library(data4PCCAR)
+library(PTCA4CATA)
+library(tableone)
+library(corrplot)
+
+```
+
+```{r}
+# set working dir
+setwd("/scratch/loliver/SPINS_PLS_Conn")
+
+# find EA residual time series files  # pattern glob2rx("*_EA_6mm_noGSR_glasser_meants.csv")
+files_EA_resid_ts <- list.files(path= ".", recursive=T, full.names=F, pattern="^.*_EA_6mm_noGSR_glasser_meants\\.csv$")
+
+# confirm csvs aren't empty
+files_EA_resid_ts[file.size(files_EA_resid_ts) > 0]
+
+# create list of IDs
+ptlist <- paste("SPN01", substring(files_EA_resid_ts,5,7), substring(files_EA_resid_ts,8,11), sep = "_")
+
+# read in time series files
+resid_ts <- lapply(files_EA_resid_ts, read.csv, header=F)
+
+# transpose dfs
+resid_ts <- lapply(resid_ts, t)
+
+# Name dfs with participant IDs
+names(resid_ts) <- ptlist
+
+```
+
+```{r}
+# read in  early termination IDs (exclude all for now)
+early_term <- read.csv(file="/projects/loliver/SPINS_PLS_Conn/data/processed/spins_termination_info_11-20-2020.csv", header=T)
+
+resid_ts <- resid_ts[!(names(resid_ts) %in% early_term$record_id)]
+
+# read in prelim exclusion info from fmriprep QC (need to update after second pass)
+exclude <- read.csv(file="/projects/loliver/SPINS_PLS_Conn/data/processed/exclusion_list.csv", header=T)
+
+resid_ts <- resid_ts[!(names(resid_ts) %in% exclude$record_id)]
+
+# read in mean FD info and exclude participants with mean FD > 0.5 for any run
+spins_ea_fd <- read.csv(file="/projects/loliver/SPINS_PLS_Conn/data/processed/SPINS_fd_by_run_12-14-2020.csv")
+spins_ea_hi_fd <- na.omit(spins_ea_fd[spins_ea_fd$fd_mean.emp_run.1_bold>0.5|spins_ea_fd$fd_mean.emp_run.2_bold>0.5|spins_ea_fd$fd_mean.emp_run.3_bold>0.5, c("record_id","fd_mean.emp_run.1_bold","fd_mean.emp_run.2_bold","fd_mean.emp_run.3_bold")])
+
+resid_ts <- resid_ts[!(names(resid_ts) %in% spins_ea_hi_fd$record_id)]
+
+# notes from old EA conn - DC these - have only excluded those based on falling asleep and task difficulty at this point (included in exclusion_list)
+# remove early term participants and those without EA ratings or truncated EA (truncated - ZHP_0096, lots of motion - ZHH_0038)
+# remove CMH_0048 and CMH_0050 from include list due to lack of activation being detected across multiple ROIs - QC notes also say 0050 had really bad motion
+# also CMH_0044 for now (check re blacklist note, but no blacklisting), CMH_0136 and CMH_0144 as slept through EA; CMH_0146, CMH_0155 due to task difficulty
+# and MRC_0058, MRC_0071, ZHP_0073, ZHP_0122 due to movement; MRC_0074 due to sfnr issues; 
+# ZHH_0038, CMH_0044, and MRC_0058 are excluded based on current lists
+
+```
+
+```{r}
+# find circles onsets for each participant
+setwd("/scratch/loliver/SPINS_PLS_Conn")
+files_circles <- list.files(path= ".", recursive=T, full.names=F, pattern="^.*_circles\\.1D$")
+
+# create list of IDs
+circ_ptlist <- paste("SPN01", substring(files_circles,5,7), substring(files_circles,8,11), sep = "_")
+
+# read in circles files
+circles <- lapply(files_circles, read.csv, header=F, sep=" ", colClasses=c(NA, NA, "NULL"))
+names(circles) <- circ_ptlist
+
+# get circles onset times into same row, adding 546 s per run and dividing by 2 as TRs are 2s
+circles_times <- list()
+
+for (i in names(circles)) {
+  circles_times[[i]] <- round((cbind(circles[[i]][1,],(circles[[i]][2,])+546,(circles[[i]][3,])+1092))/2)
+}
+
+# remove circles from time series data
+ea_resid_ts <- list()
+
+for (i in names(resid_ts)) {
+  ea_resid_ts[[i]] <- resid_ts[[i]][-c(circles_times[[i]][1,1]:(circles_times[[i]][1,1]+19),circles_times[[i]][1,2]:(circles_times[[i]][1,2]+19),
+                         circles_times[[i]][1,3]:(circles_times[[i]][1,3]+19),circles_times[[i]][1,4]:(circles_times[[i]][1,4]+19),
+                         circles_times[[i]][1,5]:(circles_times[[i]][1,5]+19),circles_times[[i]][1,6]:(circles_times[[i]][1,6]+19)),]
+}
+
+
+# check dims
+lapply(ea_resid_ts, dim)
+
+# check for NAs
+for (i in names(ea_resid_ts)) {
+  print (i)
+  print(which(is.na(ea_resid_ts[[i]])))
+}
+
+```
+
+```{r}
+# read in behavioural data
+spins_behav <- read.csv("/projects/loliver/SPINS_PLS_Conn/data/processed/spins_behav_data_full_11-20-2020.csv", header = T, stringsAsFactors = F)
+
+# change ZHH_0060 to ZHP_0060 in spins_behav as same participant scanned on both scanners and we're using the Prisma (behav done once, all under ZHH_0060 in Redcap)
+spins_behav[spins_behav$record_id=="SPN01_ZHH_0060","record_id"] <- "SPN01_ZHP_0060"
+
+# keep only participants we have EA connectivity data for
+spins_behav_conn <- spins_behav[spins_behav$record_id %in% names(ea_resid_ts),]
+case <- as.vector(spins_behav_conn[spins_behav_conn$diagnostic_group=="case","record_id"])
+control <- as.vector(spins_behav_conn[spins_behav_conn$diagnostic_group=="control","record_id"])
+
+# add mean EA to df
+# find EA regressor files
+setwd("/scratch/loliver/SPINS_PLS_Conn")
+files_ea <- list.files(path= ".", recursive=T, full.names=F, pattern="^.*_EA\\.1D$")
+
+# create list of IDs
+ea_ptlist <- paste("SPN01", substring(files_ea,5,7), substring(files_ea,8,11), sep = "_")
+
+# read in ea regressor files
+ea <- lapply(files_ea, read.csv, header=F, sep="*")
+ea <- lapply(ea, cSplit, splitCols=2:4, sep=":")
+names(ea) <- ea_ptlist
+
+# calculate mean EA and add to spins_behav_conn
+spins_behav_conn$mean_ea <- NA
+
+for (i in names(ea_resid_ts)) {
+  spins_behav_conn[spins_behav_conn$record_id==i,"mean_ea"] <- mean(c(ea[[i]][[1,"V2_1"]],ea[[i]][[1,"V3_1"]],ea[[i]][[1,"V4_1"]],
+    ea[[i]][[2,"V2_1"]],ea[[i]][[2,"V3_1"]],ea[[i]][[2,"V4_1"]],ea[[i]][[3,"V2_1"]],ea[[i]][[3,"V3_1"]],ea[[i]][[3,"V4_1"]]))
+}
+
+# fisher z transform EA values
+spins_behav_conn$mean_ea <- fisherz(spins_behav_conn$mean_ea)
+
+# write.csv(spins_behav_conn, file="/projects/loliver/SPINS_PLS_Conn/data/processed/spins_behav_ea_conn_11-24-2020.csv", row.names=F)
+
+```
+
+```{r}
+# read in Glasser ROI labels (360)
+rois <- read.csv(file = "/projects/loliver/SPINS_PLS_Conn/data/Glasser_roi_labels.csv", header=F, sep=" ")[c(TRUE, FALSE), 1]
+
+# read in Alcala-Lopez et al. (2018) soc cog Glasser ROIs
+sc_rois <- read.csv(file = "/projects/loliver/SPINS_PLS_Conn/data/Glasser_Alcala-Lopez_scog_rois.csv", header=F)
+
+# add labels to df columns
+for (i in names(ea_resid_ts)) {
+  colnames(ea_resid_ts[[i]]) <- as.vector(rois)
+  ea_resid_ts[[i]] <- data.frame(ea_resid_ts[[i]])
+}
+
+# Generate correlation matrices for each participant (could use partial corrs here instead?)
+ea_cor <- lapply(ea_resid_ts, correlate)
+
+# set upper triangle to NA
+ea_cor <- lapply(ea_cor, shave)
+
+# example corr plot
+rplot(ea_cor[[1]])
+
+# create dfs with corrs for each participant
+ea_cor_str <- lapply(ea_cor, stretch, na.rm=F)
+ea_cor_stru <- lapply(ea_cor_str, unite, col="rois", 1:2, sep="-", remove=T)
+ea_cor_df <- lapply(ea_cor_stru, data.frame)
+
+# change col 1 to row names
+cor_names <- as.vector(ea_cor_df[[1]][,1])
+
+for (i in names(ea_cor_df)) {
+  ea_cor_df[[i]] <- data.frame(ea_cor_df[[i]][,2])
+  ea_cor_df[[i]] <- t(ea_cor_df[[i]])
+  colnames(ea_cor_df[[i]]) <- cor_names
+}
+
+# bind rows across df list to generate tibble with all corrs for each participant
+ea_corrs <- do.call("rbind",ea_cor_df)
+rownames(ea_corrs) <- names(ea_cor_df)
+
+# remove columns with only NAs
+ea_corrs <- ea_corrs[,colSums(is.na(ea_corrs)) != nrow(ea_corrs)]
+
+# fisher z transform corrs
+ea_corrs_z  <- fisherz(ea_corrs)
+
+```
+
+```{r warning=FALSE}
+# plsc (Derek Beaton's pkg; symmetric analysis as per McIntosh et al., 1996)
+
+# create separate X and Y matrices 
+conn <- as.matrix(ea_corrs_z) # x var
+
+beh <- as.matrix(spins_behav_conn[,c("scog_rmet_total","scog_er40_total","mean_ea","scog_tasit1_total","scog_tasit2_sinc",
+          "scog_tasit2_simpsar","scog_tasit2_parsar","scog_tasit3_lie","scog_tasit3_sar",
+          "np_domain_tscore_process_speed","np_domain_tscore_att_vigilance","np_domain_tscore_work_mem",
+          "np_domain_tscore_verbal_learning","np_domain_tscore_visual_learning","np_domain_tscore_reasoning_ps")]) # y var
+rownames(beh) <- spins_behav_conn$record_id
+colnames(beh) <- c("RMET","ER40","EA","TASIT1","T2_sinc","T2_simsar","T2_parsar","T3_lie","T3_sar","Proc_Speed","Att_Vig","Work_Mem",
+"Verb_Learn","Vis_Learn","Reason_PS") 
+
+# remove rows with NAs (could impute these later - only 10 people missing behavioural values)
+beh <- na.omit(beh)
+conn <- conn[rownames(conn) %in% rownames(beh),]
+
+# generate table one
+char_table <- spins_behav_conn[,c("record_id","diagnostic_group","demo_sex","demo_age_study_entry","scog_rmet_total","scog_er40_total",
+          "mean_ea","scog_tasit1_total","scog_tasit2_sinc",
+          "scog_tasit2_simpsar","scog_tasit2_parsar","scog_tasit3_lie","scog_tasit3_sar",
+          "np_domain_tscore_process_speed","np_domain_tscore_att_vigilance","np_domain_tscore_work_mem",
+          "np_domain_tscore_verbal_learning","np_domain_tscore_visual_learning","np_domain_tscore_reasoning_ps")]
+char_table <- na.omit(char_table)
+colnames(char_table) <- c("ID","Diagnostic_Group","Sex_at_birth","Age","RMET","ER40","EA","TASIT1","T2_sinc","T2_simsar","T2_parsar",
+                          "T3_lie","T3_sar","Proc_Speed","Att_Vig","Work_Mem","Verb_Learn","Vis_Learn","Reason_PS") 
+
+table_one <- CreateTableOne(strata="Diagnostic_Group",data=char_table[,2:19])
+
+table = print(table_one)
+
+#write.csv(table,file="/projects/loliver/SPINS_PLS_Conn/data/processed/tableone_12-16-2020.csv")
+
+
+# examine covariance - maybe after so we can focus on most relevant variables
+# ea_cbind(beh,conn)
+library(eqs2lavaan)
+beh_cor <- cor(beh)
+beh_cov <- cov(beh)
+corrplot(beh_cor,method="circle",tl.cex=.9,tl.col="black",type="upper")
+plotCov(beh_cov)  # looks terrible
+
+# run pls - include scaling as these variables have not been z-scored
+# may want to revisit centering and scaling options, but these are per behavioural PLS in MATLAB (centered and normalized with sum of squares of each column equal to 1)
+ea_plsc <- tepPLS(conn, beh, center1 = TRUE, scale1 = "SS1", center2 = TRUE, scale2 = "SS1", DESIGN=NULL, graphs=FALSE)
+
+# permutation testing and scree plot to determine number of components
+set.seed(999)
+perm_ea_plsc <- perm4PLSC(conn, beh, center1 = TRUE, scale1 = "SS1", center2 = TRUE, scale2 = "SS1", nIter = 1000) 
+
+#plot scree
+PlotScree(ev = ea_plsc$TExPosition.Data$eigs, p.ev = perm_ea_plsc$pEigenvalues, plotKaiser = TRUE, col.ns = "black",
+          col.sig = "red")
+
+# plot scores ## these are appearing weirdly
+LV1 <- cbind(ea_plsc$TExPosition.Data$lx[,1],ea_plsc$TExPosition.Data$ly[,1])
+colnames(LV1) <- c("Lx_conn 1", "Ly_beh 1")
+plot_LV1 <- createFactorMap(LV1) 
+
+cor(ea_plsc$TExPosition.Data$lx[,1],ea_plsc$TExPosition.Data$ly[,1])
+plot_LV1$zeMap_background + plot_LV1$zeMap_dots
+
+
+LV2 <- cbind(ea_plsc$TExPosition.Data$lx[,2],ea_plsc$TExPosition.Data$ly[,2])
+colnames(LV2) <- c("Lx_conn 2", "Ly_beh 2")
+plot_LV2 <- createFactorMap(LV2, constraints = NULL)
+
+cor(ea_plsc$TExPosition.Data$lx[,2],ea_plsc$TExPosition.Data$ly[,2])
+plot_LV2$zeMap_background + plot_LV2$zeMap_dots
+
+# salience plots and bootstrapping for contributor significance
+
+# contributions/saliences (loadings) are absolute values, so need to get signs based on factor scores
+Cx_conn <- ea_plsc$TExPosition.Data$ci * sign(ea_plsc$TExPosition.Data$fi)
+Cy_beh <- ea_plsc$TExPosition.Data$cj * sign(ea_plsc$TExPosition.Data$fj)
+
+# bootstrapped model
+ea_plsc_boot <- Boot4PLSC(conn, beh, center1 = TRUE, scale1 = "SS1", center2 = TRUE, scale2 = "SS1", nIter = 1000,
+  critical.value = 2, nf2keep = 3, alphaLevel = 0.05) # change back to 1000
+
+```
+
+```{r}
+# salience plots
+# sig conn for LV1
+names(which(ea_plsc_boot$bootRatiosSignificant.i[,1] == TRUE))
+
+#LV1_Conn <- PrettyBarPlot2(bootratio = round(100*Cx_conn[,1]), 
+#            threshold = 100/nrow(Cx_conn),
+#            signifOnly = TRUE,
+#            plotnames = TRUE,
+#            main = "Conn Factor Loadings LV1",
+#            ylab = "Variable Factor Loadings")
+
+# sig conn for LV2
+names(which(ea_plsc_boot$bootRatiosSignificant.i[,2] == TRUE)) 
+
+#LV2_Conn <- PrettyBarPlot2(bootratio = round(100*Cx_conn[,2]), 
+#            plotnames = TRUE,
+#            signifOnly = TRUE,
+#            main = "Conn Factor Loadings LV2",
+#            ylab = "Variable Factor Loadings")
+
+
+# sig beh for LV1
+names(which(ea_plsc_boot$bootRatiosSignificant.j[,1] == TRUE))
+
+PrettyBarPlot2(bootratio = round(100*Cy_beh[,1]),
+            threshold = 2,
+            plotnames = TRUE,
+            font.shrink = 0,
+            font.size = 6,
+            main = "Beh Factor Loadings LV1",
+            ylab = "Variable Factor Loadings")
+
+# sig beh for LV2
+names(which(ea_plsc_boot$bootRatiosSignificant.j[,2] == TRUE))
+
+PrettyBarPlot2(bootratio = round(100*Cy_beh[,2]),
+            threshold = 7,
+            plotnames = TRUE,
+            font.shrink = 0,
+            font.size = 6,
+            main = "Beh Factor Loadings LV2",
+            ylab = "Variable Factor Loadings")
+
+
+```
+
+```{r}
+# Visualize conn findings
+
+library(brainGraph)
+
+# Get glasser atlas (hcp_mmp1.0) info and output csv
+glasser_info <- data.frame(hcp_mmp1.0[1:360])
+
+#write.csv <- write.csv(glasser_info, file="/projects/loliver/SPINS_PLS_Conn/data/Glasser_roi_info_brainGraph.csv", row.names=T)
+
+
+# Generate matrices with salience values for sig contributors for LV1
+ea_conn_LV1 <- unite(ea_cor_str[[1]], col="rois", 1:2, sep="-", remove=F)
+
+# change r values to saliences for significant connections
+ea_conn_LV1[ea_conn_LV1$rois %in% names(which(ea_plsc_boot$bootRatiosSignificant.i[,1] == TRUE)), "r"] <- round(10000*(Cx_conn[rownames(Cx_conn) %in% names(which(ea_plsc_boot$bootRatiosSignificant.i[,1] == TRUE)),1]),2)
+
+# make all other connections 0
+ea_conn_LV1[!(ea_conn_LV1$rois %in% names(which(ea_plsc_boot$bootRatiosSignificant.i[,1] == TRUE))), "r"] <- 0
+
+# convert back to correlation matrix
+ea_cor_conn_LV1 <- data.frame(retract(ea_conn_LV1[,2:4]))
+ea_cor_conn_LV1 <- cbind(ea_cor_conn_LV1$term,(ea_cor_conn_LV1[,2:361]/1.7))
+colnames(ea_cor_conn_LV1)[1] <- "term"
+
+ea_cormat_conn_LV1 <- as.matrix(ea_cor_conn_LV1[,2:361])
+rownames(ea_cormat_conn_LV1) <- ea_cor_conn_LV1$term
+ea_cormat_conn_LV1 <- ea_cormat_conn_LV1/1.7
+
+# visualize LV1 conn results
+#ea_cor_conn_LV1[ea_cor_conn_LV1$term %in% as.vector(sc_rois$V1),"term"] <- "SOCCOG"
+
+#corrplot(ea_cormat_conn_LV1,method="circle",tl.cex=.9,tl.col="black",type="upper") looks bad
+
+#ggplot(data = ea_conn_LV1) + 
+#  geom_tile(aes(x, y, fill = r)) +
+#  scale_fill_gradientn(colours = rainbow(5))
+
+
+rplot(ea_cor_conn_LV1[1:360,c(1:361)]) +
+theme(axis.text.x = element_text(angle = 90),axis.text = element_text(size = 6))
+
+rplot(ea_cor_conn_LV1[1:180,c(1:181)]) +
+theme(axis.text.x = element_text(angle = 90),axis.text = element_text(size = 5.5))
+
+rplot(ea_cor_conn_LV1[1:120,c(1:121)]) +
+theme(axis.text.x = element_text(angle = 90),axis.text = element_text(size = 7))
+
+rplot(ea_cor_conn_LV1[1:120,c(1:121)]) +
+theme(axis.text.x = element_text(angle = 90),axis.text = element_text(size = 7))
+
+rplot(ea_cor_conn_LV1[121:240,c(1,122:241)]) +
+theme(axis.text.x = element_text(angle = 90),axis.text = element_text(size = 7))
+
+rplot(ea_cor_conn_LV1[241:360,c(1,242:361)]) +
+theme(axis.text.x = element_text(angle = 90),axis.text = element_text(size = 7))
+  
+
+
+# same for LV2
+ea_conn_LV2 <- unite(ea_cor_str[[1]], col="rois", 1:2, sep="-", remove=F)
+
+# change r values to saliences for significant connections
+ea_conn_LV2[ea_conn_LV2$rois %in% names(which(ea_plsc_boot$bootRatiosSignificant.i[,2] == TRUE)), "r"] <- round(10000*(Cx_conn[rownames(Cx_conn) %in% names(which(ea_plsc_boot$bootRatiosSignificant.i[,2] == TRUE)),2]),2)
+
+# make all other connections 0
+ea_conn_LV2[!(ea_conn_LV2$rois %in% names(which(ea_plsc_boot$bootRatiosSignificant.i[,2] == TRUE))), "r"] <- 0
+
+# convert back to correlation matrix
+ea_cor_conn_LV2 <- data.frame(retract(ea_conn_LV2[,2:4]))
+ea_cor_conn_LV2 <- cbind(ea_cor_conn_LV2$term,(ea_cor_conn_LV2[,2:361]/2))
+colnames(ea_cor_conn_LV2)[1] <- "term"
+
+# visualize LV2 conn results
+rplot(ea_cor_conn_LV2) +
+theme(axis.text.x = element_text(angle = 90),axis.text = element_text(size = 7))
+
+rplot(ea_cor_conn_LV2[1:180,c(1:181)]) +
+theme(axis.text.x = element_text(angle = 90),axis.text = element_text(size = 5.5))
+
+rplot(ea_cor_conn_LV2[1:120,c(1:121)]) +
+theme(axis.text.x = element_text(angle = 90),axis.text = element_text(size = 7))
+
+rplot(ea_cor_conn_LV2[121:240,c(1,122:241)]) +
+theme(axis.text.x = element_text(angle = 90),axis.text = element_text(size = 7))
+
+rplot(ea_cor_conn_LV2[241:360,c(1,242:361)]) +
+theme(axis.text.x = element_text(angle = 90),axis.text = element_text(size = 7))
+
+```
+
+
+
+
+
+
+```{r}
+# PLSC with only soc cog beh variables
+
+# create separate X and Y matrices 
+conn <- as.matrix(ea_corrs_z) # x var
+
+sc_beh <- as.matrix(spins_behav_conn[,c("scog_rmet_total","scog_er40_total","mean_ea","scog_tasit1_total","scog_tasit2_sinc",
+          "scog_tasit2_simpsar","scog_tasit2_parsar","scog_tasit3_lie","scog_tasit3_sar")]) # y var
+rownames(sc_beh) <- spins_behav_conn$record_id
+
+# remove rows with NAs (could impute these later - only 10 people missing behavioural values)
+sc_beh <- na.omit(sc_beh)
+#sc_conn <- conn[rownames(conn) %in% rownames(sc_beh),]
+
+# yeo johnson family transform beh variables
+get_pT_yj <- function(x) {
+  pT <- x^powerTransform(x,family="yjPower")$lambda
+  return(pT)
+}
+
+sc_beh <- apply(sc_beh,2,get_pT_yj)
+sc_beh <- na.omit(sc_beh)
+sc_conn <- conn[rownames(conn) %in% rownames(sc_beh),]
+
+# examine covariance - maybe after so we can focus on most relevant variables
+
+# run pls including centering and scaling, per behavioural PLS in MATLAB - centered and normalized with sum of squares of each column equal to 1
+
+ea_sc_plsc <- tepPLS(sc_conn, sc_beh, center1 = TRUE, scale1 = "SS1", center2 = TRUE, scale2 = "SS1", DESIGN=NULL, graphs=FALSE)
+
+# permutation testing and scree plot to determine number of components
+set.seed(999)
+perm_ea_sc_plsc <- perm4PLSC(sc_conn, sc_beh, center1 = TRUE, scale1 = "SS1", center2 = TRUE, scale2 = "SS1", nIter = 500) 
+
+#plot scree
+PlotScree(ev = ea_sc_plsc$TExPosition.Data$eigs, p.ev = perm_ea_sc_plsc$pEigenvalues, plotKaiser = TRUE, col.ns = "black",
+          col.sig = "red")
+
+# plot scores ## these are appearing weirdly - need to try altering y axis again
+sc_LV1 <- cbind(ea_sc_plsc$TExPosition.Data$lx[,1],ea_sc_plsc$TExPosition.Data$ly[,1])
+colnames(sc_LV1) <- c("Lx_conn 1", "Ly_beh 1")
+plot_sc_LV1 <- createFactorMap(sc_LV1) 
+
+cor(ea_sc_plsc$TExPosition.Data$lx[,1],ea_sc_plsc$TExPosition.Data$ly[,1])
+plot_sc_LV1$zeMap_background + plot_sc_LV1$zeMap_dots
+
+
+sc_LV2 <- cbind(ea_sc_plsc$TExPosition.Data$lx[,2],ea_sc_plsc$TExPosition.Data$ly[,2])
+colnames(sc_LV2) <- c("Lx_conn 2", "Ly_beh 2")
+plot_sc_LV2 <- createFactorMap(sc_LV2, constraints = NULL)
+
+cor(ea_sc_plsc$TExPosition.Data$lx[,2],ea_sc_plsc$TExPosition.Data$ly[,2])
+plot_sc_LV2$zeMap_background + plot_sc_LV2$zeMap_dots
+
+
+# salience plots and bootstrapping for contributor significance
+# contributions/saliences (loadings) are absolute values, so need to get signs based on factor scores
+Cx_sc_conn <- ea_sc_plsc$TExPosition.Data$ci * sign(ea_sc_plsc$TExPosition.Data$fi)
+Cy_sc_beh <- ea_sc_plsc$TExPosition.Data$cj * sign(ea_sc_plsc$TExPosition.Data$fj)
+
+# bootstrapped model
+ea_sc_plsc_boot <- Boot4PLSC(sc_conn, sc_beh, center1 = TRUE, scale1 = "SS1", center2 = TRUE, scale2 = "SS1", nIter = 500,
+  critical.value = 2, nf2keep = 2, alphaLevel = 0.05)
+
+```
+
+```{r}
+# salience plots
+# sig conn for LV1
+names(which(ea_sc_plsc_boot$bootRatiosSignificant.i[,1] == TRUE))
+
+#LV1_sc_Conn <- PrettyBarPlot2(bootratio = round(100*Cx_sc_conn[,1]), 
+#            threshold = 100/nrow(Cx_sc_conn),
+#            #signifOnly = TRUE,
+#            plotnames = TRUE,
+#            main = "Conn Factor Loadings LV1",
+#            ylab = "Variable Factor Loadings")
+
+# sig conn for LV2
+names(which(ea_sc_plsc_boot$bootRatiosSignificant.i[,2] == TRUE))
+
+#LV2_sc_Conn <- PrettyBarPlot2(bootratio = round(100*Cx_sc_conn[,2]), 
+#            plotnames = TRUE,
+#            signifOnly = TRUE,
+#            main = "Conn Factor Loadings LV2",
+#            ylab = "Variable Factor Loadings")
+
+
+# sig beh for LV1
+names(which(ea_sc_plsc_boot$bootRatiosSignificant.j[,1] == TRUE))
+
+PrettyBarPlot2(bootratio = round(100*Cy_sc_beh[,1]), 
+            plotnames = TRUE,
+            main = "Beh Factor Loadings LV1",
+            ylab = "Variable Factor Loadings")
+
+# sig beh for LV2
+names(which(ea_sc_plsc_boot$bootRatiosSignificant.j[,2] == TRUE))
+
+PrettyBarPlot2(bootratio = round(100*Cy_sc_beh[,2]), 
+            plotnames = TRUE,
+            main = "Beh Factor Loadings LV2",
+            ylab = "Variable Factor Loadings")
+
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+# visualize time series for EA in Glasser ROIs - can try later
+
+for (i in names(EA_resid_ts)) {
+  EA_resid_ts_melt[[i]]$TR <- 1:819 
+  EA_resid_ts_melt[[i]] <- melt(EA_resid_ts_melt[[i]],id="TR")
+}
+
+for (i in names(resid_times_rois_melt)) {
+  ggplot(data.frame(resid_times_rois_melt[[i]]), aes(x = Sub.brick, y = value, group = 1)) + geom_line() + facet_wrap("variable") + ggtitle(i)
+}
+
+
+```
+
+```{r}
+# visualize correlation matrix for each participant
+for (i in names(cor_EA_diag[1:50])) {
+  corrplot(cor_EA[[i]], method="color",type="lower",tl.cex=.6,tl.col="black",title=i)
+}
+
+corrplot(cor_EA[["SPN01_CMH_0159"]], method="color",type="lower",tl.cex=.6,tl.col="black")
+corrplot(cor_EA[["SPN01_ZHP_0123"]], method="color",type="lower",tl.cex=.6,tl.col="black")
+```
+
+
+```{r}
+
+```
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
