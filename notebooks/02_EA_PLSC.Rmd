@@ -30,7 +30,7 @@ setwd("/scratch/loliver/SPINS_PLS_Conn")
 files_EA_resid_ts <- list.files(path= ".", recursive=T, full.names=F, pattern="^.*_EA_6mm_noGSR_glasser_meants\\.csv$")
 
 # confirm csvs aren't empty
-files_EA_resid_ts[file.size(files_EA_resid_ts) > 0]
+files_EA_resid_ts[file.size(files_EA_resid_ts) == 0]
 
 # create list of IDs
 ptlist <- paste("SPN01", substring(files_EA_resid_ts,5,7), substring(files_EA_resid_ts,8,11), sep = "_")
