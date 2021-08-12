@@ -41,7 +41,7 @@ spins_df$demo_highest_grade_dad[spins_df$demo_highest_grade_dad == 101] <- NA # 
 # write out csv with termination explanations
 term_info <- spins_df[!is.na(spins_df$term_early_withdraw),c("record_id","diagnostic_group","term_early_withdraw","term_consent_withdraw","term_no_longer_elg","term_change_health","term_deceased_date","term_psych_withdraw","term_other_specify")]
 
-write.csv(term_info, '/projects/loliver/SPINS_PLS_Conn/data/processed/spins_termination_info_11-20-2020.csv', row.names = FALSE)
+# write.csv(term_info, '/projects/loliver/SPINS_PLS_Conn/data/processed/spins_termination_info_11-20-2020.csv', row.names = FALSE)
 
 ```
 
