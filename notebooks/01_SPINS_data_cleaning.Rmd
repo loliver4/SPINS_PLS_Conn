@@ -19,6 +19,9 @@ spins_df$site <- spins_df$redcap_data_access_group
 spins_df$diagnostic_group <- ifelse(spins_df$redcap_event_name == 'control_arm_1', 'control', 'case')
 spins_df$demo_sex <- ifelse(spins_df$demo_sex_birth == 1, 'female', 'male')
 
+# no one endorsed demo_current_sex_different (though there are some NAs)
+spins_df[spins_df$demo_current_sex_different==1 & !is.na(spins_df$demo_current_sex_different),]
+
 # create scanner variable
 spins_df$scanner <- gsub("_....$", "", gsub("SPN01_", "", spins_df$record_id))
 ```
@@ -67,11 +70,13 @@ spins_df[spins_df$scanner=='MRC'|spins_df$scanner=='MRP',c('wtar_raw_score','wta
 # calculate IRI total scores
 spins_df$scog_iri_total <- rowSums(spins_df[,c('scog_iri_factor_perspective', 'scog_iri_factor_fantasy', 'scog_iri_factor_empathic_concern', 'scog_iri_factor_personal_distress')], na.rm=TRUE)
 
+# change IRI total 0s to NAs (checked no actual 0s)
+spins_df[spins_df$scog_iri_total==0,"scog_iri_total"] <- NA
+
 # reverse score ER-40 RT correct
-spins_df$scog_er40_crt <- spins_df$scog_er40_crt_columnqcrt_value*-1 # for CMH / ZHH
+spins_df$scog_er40_crt <- spins_df$scog_er40_crt_columnqcrt_value*-1 
 
 ```
-
 
 ```{r}
 # rename variables
@@ -125,7 +130,7 @@ spins_df[spins_df$diagnostic_group=="control","scid5_SSD_disorder_type"] <- NA
 
 # collapse across columns for those with and without regular employment for BSFS
 spins_df$bsfs_total <- rowSums(spins_df[,c('bsfs_sec_grandtotal1', 'bsfs_sec_grandtotal2')], na.rm=TRUE)
-spins_df[spins_df$bsfs_total == 0,'bsfs_total'] <- NA  # safe as there are no zeros in the orginal columns
+spins_df[spins_df$bsfs_total == 0,'bsfs_total'] <- NA  # safe as there are no zeros in the original columns
 
 # SANS 2-factor solution as recommended by Dr. Buchanan (email March 6, 2017)
 # ref: Blanchard, J. J., & Cohen, A. S. (2005). The structure of negative symptoms within schizophrenia: implications for assessment. Schizophrenia bulletin, 32(2), 238-245.
@@ -177,8 +182,249 @@ spins_df <- spins_df[,c("record_id","site","scanner","diagnostic_group","scid5_S
 ```
 
 ```{r}
-# write out a new csv
-write.csv(spins_df, '/projects/loliver/SPINS_PLS_Conn/data/processed/spins_behav_data_full_11-20-2020.csv', row.names = FALSE)
+# exclude participants based on early termination info # N=557
+
+# participants to exclude: 
+# term_early_withdraw = 2 (Baseline screening started, no longer eligible) N=40 
+# No instances of 4 (Change in physical health), 5 (Hospitalized and unavailable), or 7 (Patient deceased)
+ineligible_exc <- term_info[term_info$term_early_withdraw==2,"record_id"]
+spins_df <- spins_df[!(spins_df$record_id %in% ineligible_exc),] # N=517
+
+
+# term_early_withdraw = 1 (Patient withdrew consent) N=26
+early_withdraw <- term_info[term_info$term_early_withdraw==1,]
+spins_early_withdraw <- spins_df[spins_df$term_early_withdraw==1 & !is.na(spins_df$term_early_withdraw),]
+
+# participants to exclude (N=12): 
+# SPN01_CMH_0088 - Participant no longer wished to come in - no data (no visits) - eligibility checklist not completed
+# SPN01_CMH_0089 - Too busy with school - no data (no visits) - eligibility checklist not completed
+# SPN01_CMH_0102 - dropped out as decided didn't want to do MRI (only did visit 1 - no cog data) - eligibility checklist not completed
+# SPN01_CMH_0115 - wary of MRI and substance eligibility unable to be reassessed after positive
+# SPN01_CMH_0121 - Participant was not able to abstain for a clean UDS. Decided not to continue in study.
+# SPN01_CMH_0127 - found research too taxing (only did visit 1 - no cog data) - dropped out prior to determining eligibility
+# SPN01_CMH_0141 - no longer wanted to pursue research - eligibility checklist not completed
+# SPN01_CMH_0204 - too busy - eligibility not confirmed (didn't redo UDS)
+# SPN01_MRC_0022 - not comfortable disclosing PHI - eligibility checklist not completed
+# SPN01_MRP_0111 - changed mind - eligibility checklist not completed
+# SPN01_MRP_0126 - no time - screening and eligibility checklist not completed
+# SPN01_ZHH_0046 - no longer wanted to participate - not eligible - could not provide informed consent
+
+early_withdraw_exc <- c("SPN01_CMH_0088","SPN01_CMH_0089","SPN01_CMH_0102","SPN01_CMH_0115","SPN01_CMH_0121","SPN01_CMH_0127",
+                        "SPN01_CMH_0141","SPN01_CMH_0204","SPN01_MRC_0022","SPN01_MRP_0111","SPN01_MRP_0126","SPN01_ZHH_0046")
+spins_df <- spins_df[!(spins_df$record_id %in% early_withdraw_exc),] # N=505
+
+# participants to include:
+  # no cog data
+# SPN01_CMH_0082 - dropped out as decided didn't want to do MRI (only did visit 1 - no cog or MRI data) - participant never marked eligible re metal implants (x ray was needed), but otherwise met criteria
+# SPN01_CMH_0108 - decided didn't want to continue (did visit 1 but no QLS or BSFS - no cog or MRI data)
+# SPN01_CMH_0122 - no longer had the time (only did visit 1 - no cog or MRI data)
+# SPN01_CMP_0173 - used cannabis over weekend and decided to withdraw after (UDS negative before; only did visit 1 - no cog or MRI data)
+# SPN01_CMP_0202 - didn't want to take time off and didn't like MRI (did Visits 1 and 2 - MRI, but no cog data)
+# SPN01_MRP_0090 - dropped out as didn't want to get x-ray pre MRI (only did visit 1 - no cog or MRI data)
+# SPN01_MRP_0130 - no time (only did visit 1 - no cog or MRI data)
+# SPN01_ZHH_0016 - claustrophobic and stressed by study (only did visit 1 - no cog or MRI data)
+# SPN01_ZHH_0050 - stressed by study (did visit 1, but no QLS or BSFS - no cog or MRI data)
+# SPN01_ZHP_0075 - withdrew pre-MRI (only did visit 1 - no cog or MRI data)
+# SPN01_ZHP_0080 - withdrew after MRI, but no MRI data in archive (noted EA and ImObs data not usable; completed visits 1 and 2 - no cog or MRI data)
+# SPN01_ZHP_0162 - didn't want to continue (did Visits 1 and 2 - MRI, but no cog data)
+  # cog data
+# SPN01_CMH_0189 - new job (did visits 1 and 3 - cog data aside from the ER40 (no explanation as to why), but no MRI)
+# SPN01_ZHH_0026 - withdrew in scanner (did visits 1 and 3, but no MRI data)
+
+
+# term_early_withdraw = 8 (Withdrawn by study psychiatrist) N=15
+withdrawn <- term_info[term_info$term_early_withdraw==8,]
+spins_withdrawn <- spins_df[spins_df$term_early_withdraw==8 & !is.na(spins_df$term_early_withdraw),]
+
+# participants to exclude (N=11 + 1 categorized as could not tolerate MRI, below):
+# SPN01_CMH_0009 - high hbA1c values - DC
+# SPN01_CMH_0035 - med changes - eligibility checklist not completed
+# SPN01_CMH_0037 - clinically unstable - didn't even complete the SCID
+# SPN01_CMH_0060 - too large for MRI - eligibility checklist not completed
+# SPN01_CMH_0092 - multiple positive UDS - not eligible
+# SPN01_CMH_0099 - LOC > 30 mins - eligibility checklist not completed
+# SPN01_CMH_0116 - determined mid screening not eligible 
+# SPN01_CMH_0132 - high hbA1c values - not eligible
+# SPN01_CMH_0163 - positive UDS and unreliable reporting - not eligible
+# SPN01_CMH_0210 - determined not to have psychosis by clinical team - diagnosis discrepancy - ineligible 
+# SPN01_CMP_0178 - positive UDS (determined late and couldn't be reached to redo) - not eligible
+
+psych_withdraw_exc <- c("SPN01_CMH_0009","SPN01_CMH_0035","SPN01_CMH_0037","SPN01_CMH_0060","SPN01_CMH_0092","SPN01_CMH_0099",
+                        "SPN01_CMH_0116","SPN01_CMH_0132","SPN01_CMH_0163","SPN01_CMH_0210","SPN01_CMP_0178")
+spins_df <- spins_df[!(spins_df$record_id %in% psych_withdraw_exc),] # N=494
+
+# participants to include:
+  # no cog data
+# SPN01_CMH_0032 - movement medication side effects (only did visit 1 - no cog or MRI data)
+# SPN01_CMH_0081 - withdrew pre-MRI (only did visit 1 - no cog or MRI data)
+# SPN01_CMP_0174 - determined to be clinically unstable (only did visit 1 - no cog or MRI data)
+# SPN01_CMP_0208 - missed too many MRIs (only did visit 1 - no cog or MRI data)
+
+
+# explore those who remain from other categories (N=22):
+exp_term <- spins_df[spins_df$term_early_withdraw!=2 & spins_df$term_early_withdraw!=1 & spins_df$term_early_withdraw!=8 & !is.na(spins_df$term_early_withdraw),]
+exp_term <- exp_term[order(exp_term$term_early_withdraw),] 
+
+# term_early_withdraw = 3 (Unable to contact) N=6; 2 excluded
+# participants to exclude:
+# SPN01_CMH_0019 - eligibility checklist not completed
+# SPN01_MRP_0108 - eligibility checklist not completed
+
+# participants to include:
+  # no cog data
+# SPN01_CMP_0183 - unable to contact (did Visits 1 and 2 - MRI, but no cog data)
+# SPN01_MRC_0059 - unable to contact (only did visit 1 - no cog or MRI data)
+# SPN01_ZHP_0103 - unable to contact (did Visits 1 and 2 - MRI, but no cog data)
+  # cog data
+# SPN01_MRP_0163 - unable to contact (did visits 1 and 3 - cog data, but no MRI data)
+
+# term_early_withdraw = 6 (Could not tolerate MRI) N=8; 1 excluded 
+# participants to exclude:
+# SPN01_ZHH_0059 - ineligible based on clinician decision (no for able to participant in and provide informed consent) # coding them as excluded due to Withdrawn by Psychiatrist (so as not to confuse with those only excluded from imaging analyses) 
+
+# participants to include: 
+  # no cog data
+# SPN01_CMH_0010 - withdrew from study after 1st visit - anxious to do MRI (only did visit 1 - no cog or MRI data)
+# SPN01_CMH_0045 - could not tolerate MRI (only completed visit 1 - no cog or MRI data)
+# SPN01_CMH_0161 - was unable to enter MRI (only completed visit 1 - no cog or MRI data)
+# SPN01_MRP_0129 - no notes (only completed visit 1 - no cog or MRI data)
+# SPN01_MRP_0131 - MRI coil too small for head (only completed visit 1 - no cog or MRI data)
+# SPN01_ZHP_0092 - refused to complete MRI (only completed visit 1 - no cog or MRI data)
+  # cog data
+# SPN01_CMH_0018 - deemed too large to fit in scanner (did visits 1 and 3 - cog data, but no MRI data)
+
+# term_early_withdraw = 9 (Patient relocated/unavailable for appointments) N=2; 1 excluded
+# participants to exclude:
+# SPN01_MRP_0141 - unable to obtain UDS (missed appt) - unable to meet eligibility criteria 
+
+# participants to include:
+  # no cog data
+# SPN01_MRP_0147 - participant moved (did visit 1 but no QLS or BSFS and part of visit 2 (MRI incomplete - RS but no EA, ImObs, or DWI) - no cog data)
+
+# term_early_withdraw = 10 (Other N=6); 2 excluded
+# participants to exclude: 
+# SPN01_CMH_0064 - participant relocated and required rescreen for positive UDS - not eligible
+# SPN01_ZHH_0036 - High HbA1c - not eligible
+
+# participants to include: 
+  # no cog data
+# SPN01_MRP_0138 - termination checklist says eligible (all answers reflect eligibility) but RA answered no - notes say could not fit in scanner and included in RDOC upload, so I think okay to use existing data (only completed visit 1 - no cog or MRI data) 
+# SPN01_MRP_0149 - terminated scan early due to subject not following prompts - moved throughout scan, did not observe/imitate properly, and didn't complete EA (did visits 1 and 2 (imaging probably not usable) - no cog data)
+# SPN01_ZHP_0100 - lost to follow up (did visits 1 and 2 - MRI, but no cog data)
+# SPN01_ZHP_0135 - lost to follow up (only did visit 1 - no cog or MRI data)
+
+rm_other <- c("SPN01_CMH_0019","SPN01_MRP_0108","SPN01_ZHH_0059","SPN01_MRP_0141","SPN01_CMH_0064","SPN01_ZHH_0036")
+spins_df <- spins_df[!(spins_df$record_id %in% rm_other),] # N=488
+
+# CMH_0155 found to have an ASD diagnosis after the end of the study (via SPINS-ASD) - exclude as per Stephanie's recommendation
+spins_df <- spins_df[spins_df$record_id!="SPN01_CMH_0155",] # N=487
+
+# one participant completed the study twice, at two different sites - SPN01_ZHP_0130 is the same as SPN01_CMH_0135 - using ZHP_0130 for prisma data (soc cog scores and functioning very similar; cog a bit different, but not all better on re-test)
+spins_df <- spins_df[spins_df$record_id!="SPN01_CMH_0135",] # N=486
+
+```
+
+```{r}
+# participants missing all cog data (soc and neuro) - recode to NAs (N=30)
+no_cog <- c("SPN01_CMH_0082","SPN01_CMH_0108","SPN01_CMH_0122","SPN01_CMP_0173","SPN01_CMP_0202",
+            "SPN01_MRP_0090","SPN01_MRP_0130","SPN01_ZHH_0016","SPN01_ZHH_0050","SPN01_ZHP_0075",
+            "SPN01_ZHP_0080","SPN01_ZHP_0162","SPN01_CMH_0032","SPN01_CMH_0081","SPN01_CMP_0174",
+            "SPN01_CMP_0208","SPN01_CMP_0183","SPN01_MRC_0059","SPN01_ZHP_0103","SPN01_CMH_0010",
+            "SPN01_CMH_0045","SPN01_CMH_0161","SPN01_MRP_0129","SPN01_MRP_0131","SPN01_ZHP_0092",
+            "SPN01_MRP_0147","SPN01_MRP_0138","SPN01_MRP_0149","SPN01_ZHP_0100","SPN01_ZHP_0135")
+
+spins_df[spins_df$record_id %in% no_cog,16:65] <- NA
+
+# check for other missing cog data
+spins_df_cog_check <- spins_df[!(spins_df$record_id %in% no_cog),c(1,16:65,4)]
+missing_cog <- spins_df_cog_check[!complete.cases(spins_df_cog_check),c(1:4,10,13:16,21:23,28:29,34:51)] # N=22 (largely missing 1 or 2 measures)
+
+# participants missing all soc cog data - recode to NAs
+# SPN01_ZHP_0164 - unable to complete social cog due to cognitive impairment and neg symptoms (but did complete MATRICS); also refused to begin/finish MRI
+no_soc_cog <- c("SPN01_ZHP_0164")  
+spins_df[spins_df$record_id %in% no_soc_cog,16:47] <- NA
+
+# ZHP_0110 and ZHP_0172 did not complete ER40, RMET, and tasit (only tasit coded incorrectly); ZHP_0172 also did not complete RAD (coded as NA) - change tasit to NAs
+spins_df[spins_df$record_id=="SPN01_ZHP_0110" | spins_df$record_id=="SPN01_ZHP_0172",24:41] <- NA
+
+# SPN01_ZHP_0144 refused to complete TASIT after Part 2 - change Part 3 to NAs
+# SPN01_ZHP_0140 refused to complete TASIT after Part 3 Q8 - change Part 3 to NAs
+# SPN01_ZHP_0094 refused to complete TASIT after Part 3 Q4 - change Part 3 to NAs
+# SPN01_CMH_0105 score of 0 for tasit2_simsar total appears to be real
+spins_df[spins_df$record_id=="SPN01_ZHP_0144"|spins_df$record_id=="SPN01_ZHP_0140"|spins_df$record_id=="SPN01_ZHP_0094",35:41] <- NA
+
+```
+
+```{r}
+# change IDs for participants with repeated scans (using prisma scans in these cases with behavioural from 1st visit)
+# SPN01_CMP_0211 has their behavioural data under SPN01_CMH_0211, so change to CMP_0211
+spins_df[spins_df$record_id=="SPN01_ZHH_0060","record_id"] <- "SPN01_ZHP_0060"
+spins_df[spins_df$record_id=="SPN01_CMH_0180","record_id"] <- "SPN01_CMP_0180"
+spins_df[spins_df$record_id=="SPN01_CMH_0182","record_id"] <- "SPN01_CMP_0182"
+spins_df[spins_df$record_id=="SPN01_CMH_0191","record_id"] <- "SPN01_CMP_0191"
+spins_df[spins_df$record_id=="SPN01_CMH_0196","record_id"] <- "SPN01_CMP_0196"
+spins_df[spins_df$record_id=="SPN01_CMH_0198","record_id"] <- "SPN01_CMP_0198"
+spins_df[spins_df$record_id=="SPN01_CMH_0207","record_id"] <- "SPN01_CMP_0207"
+spins_df[spins_df$record_id=="SPN01_CMH_0211","record_id"] <- "SPN01_CMP_0211" 
+spins_df[spins_df$record_id=="SPN01_CMH_0213","record_id"] <- "SPN01_CMP_0213"
+
+# change scanner variable accordingly
+spins_df[spins_df$record_id=="SPN01_ZHP_0060","scanner"] <- "ZHP"
+CMP <- c("SPN01_CMP_0180","SPN01_CMP_0182","SPN01_CMP_0191","SPN01_CMP_0196","SPN01_CMP_0198",
+            "SPN01_CMP_0207","SPN01_CMP_0211","SPN01_CMP_0213")
+spins_df[spins_df$record_id %in% CMP,"scanner"] <- "CMP"
+
+# write out inclusion list after early term exclusion
+#write.table(spins_df[,"record_id"], '/projects/loliver/SPINS/data/spins_inclusion_09-11-2023.csv', col.names=F, row.names=F)
+
+```
+
+```{r}
+library(psych)
+library(splitstackshape)
+
+# add mean EA to df
+# find EA regressor files
+setwd("/scratch/loliver/SPINS_PLS_Conn")
+files_ea <- list.files(path= ".", recursive=T, full.names=F, pattern="^.*_EA\\.1D$")
+
+# create list of IDs
+ea_ptlist <- paste("SPN01", substring(files_ea,5,7), substring(files_ea,8,11), sep = "_")
+
+# read in ea regressor files
+ea <- lapply(files_ea, read.csv, header=F, sep="*")
+ea <- lapply(ea, cSplit, splitCols=2:4, sep=":")
+names(ea) <- ea_ptlist
+
+# calculate mean EA and add to spins_behav_conn
+spins_df$scog_mean_ea <- NA
+
+for (i in names(ea)) {
+  spins_df[spins_df$record_id==i,"scog_mean_ea"] <- mean(c(ea[[i]][[1,"V2_1"]],ea[[i]][[1,"V3_1"]],ea[[i]][[1,"V4_1"]],
+    ea[[i]][[2,"V2_1"]],ea[[i]][[2,"V3_1"]],ea[[i]][[2,"V4_1"]],ea[[i]][[3,"V2_1"]],ea[[i]][[3,"V3_1"]],ea[[i]][[3,"V4_1"]]))
+}
+
+# fisher z transform EA values
+spins_df$scog_mean_ea <- fisherz(spins_df$scog_mean_ea)
+
+spins_df <- spins_df[,c(1:41,94,42:93)]
+
+```
+
+```{r}
+# organize race and ethnicity data
+
+
+```
+
+```{r}
+# write out a new csv - full sample N=486
+#write.csv(spins_df, '/projects/loliver/SPINS_PLS_Conn/data/processed/spins_behav_data_full_09-12-2023.csv', row.names = FALSE)
+
+# write out csv excluding participants with no cog data - N=456
+spins_df_cog <- spins_df[!(spins_df$record_id %in% no_cog),]
+
+#write.csv(spins_df_cog, '/projects/loliver/SPINS_PLS_Conn/data/processed/spins_behav_data_cog_09-12-2023.csv', row.names = FALSE)
 
 ```
 
