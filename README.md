@@ -1,9 +1,9 @@
 SPINS PLS Connectivity
 ===============================================
 
-EA and RS PLS using connectivity and behaviour
+Empathic Accuracy task and resting state fMRI partial least squares analysis using functional connectivity and social cognitive performance data
 
-Created by Lindsay Oliver lindsay.oliver@camh.ca
+Created by Lindsay Oliver lindsay.oliver@camh.ca lindsaydoliv@gmail.com
 
 
 
@@ -14,15 +14,17 @@ Project Organization
     ├── README.md          <- The top-level README
     ├── .gitignore         <- Files to not upload to github - data, reports
     ├── data
-    │   ├── processed      <- The final data
-    │   └── raw            <- The original data
+    │   ├── parcellations  <- Parcellations and associated information 
+    │   ├── processed      <- Processed data
+    │   └── raw            <- Original data
     │
     ├── notebooks          <- R notebooks for analysis workflow - should be run in order
     │
     ├── docs/references    <- Data dictionaries, manuals, and all other explanatory materials
     │
-    ├── reports            <- Generated analysis as HTML, PDF, LaTeX, etc.
-    │   └── figures        <- Generated graphics and figures to be used in reporting
-    │   └── paper          <- Manuscript drafts and materials
+    ├── reports
+    │   ├── figures        <- Generated graphics and figures
+    │   ├── paper          <- Manuscript drafts and materials
+    │   └── tables         <- Generated tables 
     │
     ├── code               <- Source code for use in this project (bash scripts)
