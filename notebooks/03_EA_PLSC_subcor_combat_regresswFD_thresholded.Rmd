@@ -25,6 +25,7 @@ library(corrplot)
 library(mice)
 library(ggplot2)
 library(stringr)
+library(colorspace)
 
 ```
 
@@ -57,7 +58,7 @@ names(resid_ts) <- ptlist
 # also checked old participants.tsv file to make sure nothing being missed
 include_list <- read.csv(file="/projects/loliver/QC/SPINS_EA_QC_fMRI_inclusion_list.csv", header=F)
 
-resid_ts <- resid_ts[names(resid_ts) %in% include_list$V1] # N=360
+resid_ts <- resid_ts[names(resid_ts) %in% include_list$V1] # N=359
 
 ```
 
@@ -102,19 +103,17 @@ for (i in names(resid_ts)) {
 ```
 
 ```{r}
-# read in behavioural data for those with cognitive data (IDs have been changed for those with repeated scans, scanner variable updated, and EA scores added) - N=456
-spins_behav <- read.csv("/projects/loliver/SPINS_PLS_Conn/data/processed/spins_behav_data_cog_09-12-2023.csv", header = T, stringsAsFactors = F)
+# read in behavioural data for those with cognitive data (IDs have been changed for those with repeated scans, scanner variable updated, and EA scores added) - N=455
+spins_behav <- read.csv("/projects/loliver/SPINS_PLS_Conn/data/processed/spins_behav_data_cog_08-12-2024.csv", header = T, stringsAsFactors = F)
 
-# keep only participants we have EA connectivity data for - N=357
+# keep only participants we have EA connectivity data for - N=356
 spins_behav_conn <- spins_behav[spins_behav$record_id %in% names(ea_resid_ts),]
 
-# ZHP_0110 and ZHP_0172 did not complete multiple soc cog tasks - exclude these participants - N=355 
+# ZHP_0110 and ZHP_0172 did not complete multiple soc cog tasks - exclude these participants - N=354 
 spins_behav_conn <- spins_behav_conn[spins_behav_conn$record_id!="SPN01_ZHP_0110" & spins_behav_conn$record_id!="SPN01_ZHP_0172",]
 
-# run if want to remove the additional 2 participants in the EA sample who don't have RS data - N=353
+# run if want to remove the additional 2 participants in the EA sample who don't have RS data - N=352
 spins_behav_conn <- spins_behav_conn[spins_behav_conn$record_id!="SPN01_MRC_0046" & spins_behav_conn$record_id!="SPN01_ZHH_0034",]
-
-#write.csv(spins_behav_conn, file="/projects/loliver/SPINS_PLS_Conn/data/processed/spins_behav_ea_conn_09-19-2023.csv", row.names=F)
 
 # keep EA data from same sample 
 ea_resid_ts <- ea_resid_ts[names(ea_resid_ts) %in% spins_behav_conn$record_id]
@@ -139,10 +138,6 @@ ea_cor <- lapply(ea_resid_ts, correlate)
 
 # set upper triangle to NA
 ea_cor <- lapply(ea_cor, shave)
-
-# example corr plot
-rplot(ea_cor[[1]])
-#rplot(ea_cor[[1]][rois_netorder$orig_order,c("term",rois_netorder$forced_name)])
 
 # create dfs with corrs for each participant
 ea_cor_str <- lapply(ea_cor, stretch, na.rm=F)
@@ -171,56 +166,19 @@ ea_corrs_z  <- fisherz(ea_corrs)
 ```
 
 ```{r}
-# impute missing values for combat variables 
-#spins_behav_combat <- spins_behav_conn[,c("record_id","scanner","diagnostic_group","demo_sex","demo_age_study_entry",
-#          "scog_rmet_total","scog_er40_total","scog_mean_ea","scog_tasit1_total","scog_tasit2_sinc",
-#          "scog_tasit2_simpsar","scog_tasit2_parsar","scog_tasit3_lie","scog_tasit3_sar",
-#          "np_domain_tscore_process_speed","np_domain_tscore_att_vigilance","np_domain_tscore_work_mem",
-#          "np_domain_tscore_verbal_learning","np_domain_tscore_visual_learning","np_domain_tscore_reasoning_ps")]
-
-# explore rows with NAs - 9 people missing any beh values
-#check <- spins_behav_combat[!complete.cases(spins_behav_combat),] 
-
-# impute remaining NA values using mice (1 each for 9 participants, aside from SPN01_ZHP_0140 missing tasit 3 lies and sar)
-# ppm (predictive mean matching) is default method; m = 5 is the default number of imputations
-# logged events are related to the categorical variables (not included in imputation)
-#spins_behav_combat <- complete(mice(spins_behav_combat))
-
-#spins_behav_combat[spins_behav_combat$record_id %in% check$record_id,]
-
-# write out behav data with imputed values
-#write.csv(spins_behav_combat, file="/projects/loliver/SPINS_PLS_Conn/data/processed/spins_behav_ea_combat_09-19-2023.csv", row.names=F)
-
 # read in variables for combat with imputed data for missing values using mice 
-spins_behav_combat <- read.csv("/projects/loliver/SPINS_PLS_Conn/data/processed/spins_behav_ea_combat_09-19-2023.csv", header = T, stringsAsFactors = F)
+spins_behav_combat <- read.csv("/projects/loliver/SPINS_PLS_Conn/data/processed/spins_behav_ea_combat_08-16-2024.csv", header = T, stringsAsFactors = F)
 
 ```
 
 ```{r}
-# run ComBat on connectivity data to harmonize across scanners
-library(neuroCombat)
-
-# dat is a data matrix of the data to harmonize - rows are features (connections) and columns are participants
-ea_corrs_com <- as.matrix(t(ea_corrs_z[rownames(ea_corrs_z) %in% spins_behav_combat$record_id,]))
-
-# mod is a design matrix specifying biological covariates that should be protected - here diagnosis, age, sex, and cog variables
-modcombat <- model.matrix(~ diagnostic_group + demo_sex + demo_age_study_entry +
-          scog_rmet_total + scog_er40_total + scog_mean_ea + scog_tasit1_total + scog_tasit2_sinc + 
-          scog_tasit2_simpsar + scog_tasit2_parsar + scog_tasit3_lie + scog_tasit3_sar + 
-          np_domain_tscore_process_speed + np_domain_tscore_att_vigilance + np_domain_tscore_work_mem + 
-          np_domain_tscore_verbal_learning + np_domain_tscore_visual_learning + np_domain_tscore_reasoning_ps, data=spins_behav_combat)
-
-# R run ComBat
-# batch is a vector (length should be equal to the number of columns in the data matrix) that specifies the id for the batch, site, or scanner to correct for
-ea_combat <- neuroCombat(dat=ea_corrs_com, batch=c(spins_behav_combat$scanner), mod=modcombat)
-
-# transpose the harmonized data matrix 
-ea_combat_data <- t(ea_combat$dat.combat)
+# read in ComBat connectivity data 
+ea_combat_data <- read.csv("/projects/loliver/SPINS_PLS_Conn/data/processed/spins_ea_combat_data_01-10-2025.csv", header = T, row.names = 1)
 
 ```
 
 ```{r}
-# regress age, sex, mean FD out of conn and behav metrics before running PLS (based on associations with these vars)
+# regress age, sex, mean FD out of conn and behav metrics before running PLS 
 
 # read in rs mean FD data
 spins_fd <- read.csv(file="/projects/loliver/QC/spins_mean_fd_per_run.csv",stringsAsFactors=F,header=T)
@@ -243,11 +201,6 @@ ea_combat_data_reg[,1:76636] <- apply(ea_combat_data_reg[,1:76636], 2, function(
 ea_combat_data_reg <- ea_combat_data_reg[,1:76636]
 
 ea_combat_data <- ea_combat_data_reg
-
-```
-
-```{r}
-#save.image(file = "/projects/loliver/SPINS_PLS_Conn/notebooks/EA_PLSC_subcor_combat_regresswFD_thresholded.RData")
 
 ```
 
@@ -295,14 +248,6 @@ table_clin <- print(table_one_clin)
 
 #write.csv(table_clin,file="/projects/loliver/SPINS_PLS_Conn/data/processed/tableone_ea_rs_imp_clin_09-19-2023.csv")
 
-# examine covariance - maybe after so we can focus on most relevant variables
-# ea_cbind(beh,conn)
-#library(eqs2lavaan)
-#beh_cor <- cor(beh)
-#beh_cov <- cov(beh)
-#corrplot(beh_cor,method="circle",tl.cex=.9,tl.col="black",type="upper")
-#plotCov(beh_cov)  # looks terrible
-
 ```
 
 ```{r warning=FALSE, fig.height=6, fig.width=6}
@@ -348,7 +293,7 @@ pls.inf2 <- data4PCCAR::perm4PLSC(Xhat, Yhat,
 # if this is not significant, your analysis is really unidimensional
 pls.inf2$pOmnibus
 
-# check if the first eigenvalue is significant - it is (p=.02)
+# check if the first eigenvalue is significant - it is (p=.005)
 pls.inf2$pEigenvalues
 
 ```
@@ -359,7 +304,7 @@ LV1 <- cbind(ea_plsc$TExPosition.Data$lx[,1],ea_plsc$TExPosition.Data$ly[,1])
 colnames(LV1) <- c("Connectivity Latent Variable Scores", "Behavior Latent Variable Scores")
 plot_LV1 <- createFactorMap(LV1, col.axes="black", col.background="white", title="EA Dimension 1 Correlation between Latent Variables") 
 
-cor.test(ea_plsc$TExPosition.Data$lx[,1],ea_plsc$TExPosition.Data$ly[,1]) # .322, p < .0001
+cor.test(ea_plsc$TExPosition.Data$lx[,1],ea_plsc$TExPosition.Data$ly[,1]) 
 plot_LV1$zeMap_background + plot_LV1$zeMap_dots + coord_cartesian()  # coord_cartesian stops plot 1:1 ratio
 
 
@@ -367,7 +312,7 @@ LV2 <- cbind(ea_plsc$TExPosition.Data$lx[,2],ea_plsc$TExPosition.Data$ly[,2])
 colnames(LV2) <- c("Connectivity Latent Variable Scores", "Behavior Latent Variable Scores")
 plot_LV2 <- createFactorMap(LV2, col.axes="black", col.background="white", title="EA Dimension 2 Correlation between Latent Variables") 
 
-cor.test(ea_plsc$TExPosition.Data$lx[,2],ea_plsc$TExPosition.Data$ly[,2]) # .401, p < .0001
+cor.test(ea_plsc$TExPosition.Data$lx[,2],ea_plsc$TExPosition.Data$ly[,2]) 
 plot_LV2$zeMap_background + plot_LV2$zeMap_dots + coord_cartesian() 
 
 ```
@@ -415,15 +360,19 @@ ea_plsc_boot <- Boot4PLSC(conn, beh, center1 = TRUE, scale1 = "SS1", center2 = T
 
 BR_conn <- ea_plsc_boot$bootRatios.i
 BR_beh <- ea_plsc_boot$bootRatios.j
+rownames(BR_beh) <- c("RMET", "Emotion Recognition 40", "Empathic Accuracy", "TASIT 1", "T2 Sincere", 
+                "T2 Simple Sarcasm", "T2 Paradoxical Sarcasm", "T3 Lies", "T3 Sarcasm", 
+                "Processing Speed", "Attention/Vigilance", "Working Memory", 
+                "Verbal Learning", "Visual Learning", "Reasoning & Problem Solving")
 
-# sig conn for LC1 # 2125 w 2.6  
+# sig conn for LC1 # 2129 w 2.6  
 length(which(ea_plsc_boot$bootRatiosSignificant.i[,1] == TRUE))
 #names(which(ea_plsc_boot$bootRatiosSignificant.i[,1] == TRUE))
 
 # sig beh for LC1  # 12 w 2.6
 names(which(ea_plsc_boot$bootRatiosSignificant.j[,1] == TRUE))
 
-# sig conn for LC2 # 232 w 2.6  
+# sig conn for LC2 # 244 w 2.6  
 length(which(ea_plsc_boot$bootRatiosSignificant.i[,2] == TRUE))
 #names(which(ea_plsc_boot$bootRatiosSignificant.i[,2] == TRUE))
 
@@ -432,11 +381,21 @@ names(which(ea_plsc_boot$bootRatiosSignificant.j[,2] == TRUE))
 
 ```
 
+```{r}
+# RData saved here
+#save.image(file = "/projects/loliver/SPINS_PLS_Conn/notebooks/EA_PLSC_subcor_combat_regresswFD_thresholded.RData")
+
+```
+
 ```{r fig.height=6, fig.width=6}
 # contribution plots
 # contributions are absolute values, so need to get signs based on factor scores
 Cx_conn <- ea_plsc$TExPosition.Data$ci * sign(ea_plsc$TExPosition.Data$fi)
 Cy_beh <- ea_plsc$TExPosition.Data$cj * sign(ea_plsc$TExPosition.Data$fj)
+rownames(Cy_beh) <- c("RMET", "Emotion Recognition 40", "Empathic Accuracy", "TASIT 1", "T2 Sincere", 
+                "T2 Simple Sarcasm", "T2 Paradoxical Sarcasm", "T3 Lies", "T3 Sarcasm", 
+                "Processing Speed", "Attention/Vigilance", "Working Memory", 
+                "Verbal Learning", "Visual Learning", "Reasoning & Problem Solving")
 
 # plot top 25 contributing conn vars 
 top_25 <- names(sort(Cx_conn[,1], decreasing=TRUE)[1:25])
@@ -459,37 +418,35 @@ print(cont_conn_plot_LC1)
 cont_beh_plot_LC1 <- PrettyBarPlot2(
   bootratio = round(100*Cy_beh[,1]),
   threshold = 100*(1/15), 
+  ylim=c(0, 14), # manually updated based on rounding
   #ylim=c(0, max(abs(100*Cy_beh[,1]))),
   color4bar = c(rep("mediumpurple4",9),rep("darkolivegreen4",6)),
   color4ns = "gray75", 
   plotnames = TRUE,
   #font.shrink = 0,
-  #font.size = 5,
-  main = 'EA Dimension 1: Contributions - Behavior',
-  ylab = 'Signed Contributions') +
-  scale_y_continuous(limits=c(0,13)) # ylim wasn't restricting the range +
-#  theme(axis.text.y = element_text(size=18))
+  font.size = 4,
+  line.alpha = 1,
+  #main = 'EA Dimension 1: Contributions - Behavior',
+  ylab = 'Contributions') +
+  scale_y_continuous(limits=c(0,14)) + # ylim wasn't restricting the range 
+  theme(axis.title.y = element_text(size=13))
 
 print(cont_beh_plot_LC1)
-
-#LV2_Conn <- PrettyBarPlot2(bootratio = round(100*Cx_conn[,2]), 
-#            plotnames = TRUE,
-#            signifOnly = TRUE,
-#            main = "Conn Factor Loadings LV2",
-#            ylab = "Signed Contributions")
 
 cont_beh_plot_LC2 <- PrettyBarPlot2(
   bootratio = round(100*Cy_beh[,2]),
   threshold = 100*(1/15),
-  ylim=NULL,
+  ylim=c(-32, max(100*Cy_beh[,2])),
   color4bar = c(rep("mediumpurple4",9),rep("darkolivegreen4",6)),
   color4ns = "gray75", 
   plotnames = TRUE,
   #font.shrink = 0,
-  #font.size = 5,
-  main = 'EA Dimension 2: Contributions - Behavior',
-  ylab = 'Signed Contributions') #+
-# theme(axis.text.y = element_text(size=18))
+  font.size = 4,
+  line.alpha = 1,
+  #main = 'EA Dimension 2: Contributions - Behavior',
+  ylab = 'Contributions') +
+  scale_y_continuous(limits=c(-32, max(100*Cy_beh[,2]))) +
+  theme(axis.title.y = element_text(size=13))
 
 print(cont_beh_plot_LC2)
 
@@ -506,9 +463,11 @@ br_beh_plot_LC1 <- PrettyBarPlot2(
   color4bar = c(rep("mediumpurple4",9),rep("darkolivegreen4",6)),
   color4ns = "gray75", 
   plotnames = TRUE, 
-  #font.size = 5,
-  main = 'EA Dimension 1: Bootstrap Ratios - Behavior', 
-  ylab = "Bootstrap Ratios")
+  font.size = 4,
+  line.alpha = 1,
+  #main = 'EA Dimension 1: Bootstrap Ratios - Behavior', 
+  ylab = "Bootstrap Ratios") +
+  theme(axis.title.y = element_text(size=13))
 
 print(br_beh_plot_LC1)
 
@@ -520,9 +479,11 @@ br_beh_plot_LC2 <- PrettyBarPlot2(
   color4bar = c(rep("mediumpurple4",9),rep("darkolivegreen4",6)),
   color4ns = "gray75", 
   plotnames = TRUE, 
-  #font.size = 5,
-  main = 'EA Dimension 2: Bootstrap Ratios - Behavior', 
-  ylab = "Bootstrap Ratios")
+  font.size = 4,
+  line.alpha = 1,
+  #main = 'EA Dimension 2: Bootstrap Ratios - Behavior', 
+  ylab = "Bootstrap Ratios") +
+  theme(axis.title.y = element_text(size=13))
 
 print(br_beh_plot_LC2)
 
@@ -585,19 +546,20 @@ print(sal_beh_plot_LC2)
 
 ```
 
-```{r fig.height=4, fig.width=10}
+```{r fig.height=5.75, fig.width=9}
 # arrange LC1 and LC2 contribution and bootstrap ratio plots 
 library(gridExtra)
 
 # contributions and bootstrap ratios
-grid.arrange(
+LD1_beh <- grid.arrange(
     cont_beh_plot_LC1,
     br_beh_plot_LC1,
     ncol = 2,nrow = 1,
     top = "" #Behavior Contributions and Bootstrap Ratios EA Dimension 1"
   )
 
-grid.arrange(
+
+LD2_beh <- grid.arrange(
     cont_beh_plot_LC2,
     br_beh_plot_LC2,
     ncol = 2,nrow = 1,
@@ -606,10 +568,6 @@ grid.arrange(
 
 ```
 
-```{r}
-# tried alternative visualizations using R4SPISE2022 (PLSC on wines: https://herveabdi.github.io/R4SPISE2022/articles/C1_PLSConWines.html), but this pkg doesn't seem to be working accurately for me and I'm happy with the plots above
-
-```
 
 ```{r fig.height=6, fig.width=8}
 # Visualize conn findings - saliences
@@ -731,14 +689,6 @@ ggraph(tg_ea_conn_LV1, layout="linear", circular=T, sort.by=Network) +
         axis.line = element_blank(),
         axis.text.x = element_blank(),
         axis.text.y = element_blank()) 
-
-
-#  scale_edge_alpha_continuous(range=c(0,1)) +
-#  scale_edge_width_continuous(range = c(1,3))
-
-#ggraph(tg_ea_conn_LV1) + 
-#  geom_edge_link() + 
-#  geom_node_point()
 
 ```
 
@@ -872,29 +822,6 @@ data.frame(ea_conn_cont_LV1_neg[order(ea_conn_cont_LV1_neg$r, decreasing = TRUE)
 
 ```
 
-```{r fig.height=12, fig.width=15}
-# generate heatmap of saliences for sig contributors (just to see)   
-
-# add forced roi names and orig order to roi df
-rois$forced_name <- colnames(ea_cor[[1]][2:393])
-rois$orig_order <- 1:392
-
-# reorganize roi data frame based on Cole Anticevic networks
-rois_netorder <- arrange(rois,net_order_ColeAnt)
-rois_netorder$colour <- c(rep("red",6),rep("pink",4),rep("purple",7),rep("blue",77),rep("lightskyblue1",15),
-              rep("green",50),rep("darkgreen",23),rep("yellow",23),rep("orange",56),rep("brown",39),
-              rep("wheat",54),rep("grey",6),rep("black",32))  ## old colours still
-
-# saliences sig only
-ggplot(ea_conn_sal_LV1, aes(x=factor(y,levels=rois_netorder$forced_name),y=factor(x,levels=rois_netorder$forced_name),fill=r)) + 
-  geom_tile() +
-  scale_fill_gradient2(high = "#b2182b", mid = "white", low = "#2166ac", 
-        midpoint = 0, limit = c(-1,1), name="Salience (sig only)") +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 10),
-        axis.text = element_text(size = 10, color=rois_netorder$colour)) 
-  #ggtitle("Connectivity Change (T2-T1) in Remitters - Relapsers") + ylab("") + xlab("")
-
-```
 
 ```{r}
 # calculate mean within and between-network values for the contributions (sig only) - pos 
@@ -980,15 +907,18 @@ tg_ea_conn_cont_LV1_neg_nets <- as_tbl_graph(ea_conn_cont_LV1_neg_nets[,1:3], di
   filter(val != "ns")
 
 ```
+```{r fig.height=6, fig.width=7.5}
+# network list without numbers
+net_names <- c("Orbito-Affective","Ventral-Multimodal","Posterior-Multimodal","Default","Auditory","Frontoparietal","Language","Dorsal-Attention",
+               "Cingulo-Opercular","Somatomotor","Secondary Visual","Primary Visual","Subcortical")
 
-```{r fig.height=6.5, fig.width=8}
-# mean nets positive loadings (contribution)
+# mean nets positive loadings (showing contribution)
 nets_pos_LV1 <- ggraph(tg_ea_conn_cont_LV1_pos_nets, layout="linear", circular=T, sort.by=name) +
   geom_edge_arc(aes(colour=val,width=mean), show.legend=F) + #, alpha=.6,
   geom_node_point(aes(colour=name), size=6, show.legend=F) +
   scale_colour_manual(values=net_cols) +
   scale_edge_color_manual(values="#00BFC4") + # added because connections all positive
-  scale_edge_width_continuous(range = c(0,1), limits = c(0,.25)) + 
+  scale_edge_width_continuous(range = c(0,1), limits = c(0,.3)) + 
   geom_edge_loop(aes(colour=val, width=mean, span=90, direction=360)) +  #, alpha=.6
   ggtitle("Positive Loadings") + 
   theme_minimal() + 
@@ -998,9 +928,11 @@ nets_pos_LV1 <- ggraph(tg_ea_conn_cont_LV1_pos_nets, layout="linear", circular=T
         axis.line = element_blank(),
         axis.text.x = element_blank(),
         axis.text.y = element_blank(),
-        axis.title = element_blank()) 
+        axis.title = element_blank()) # plot.margin = unit(c(0, 1.5, 0, 1.5),"inches")) tried to stop labels getting cut
 
-nets_pos_LV1 + geom_node_text(aes(label=name,colour=name), show.legend=F, nudge_x=nets_pos_LV1$data$x*.4, nudge_y=nets_pos_LV1$data$y*.2) 
+nets_pos_LV1 + geom_node_text(aes(label=net_names,colour=name,size=3.5), nudge_x=.12, nudge_y=-.14, show.legend=F)
+
+#ggsave(filename="/projects/loliver/SPINS_PLS_Conn/reports/figures/EA_LD1_nets_pos.png", device = "png", height=6, width=7.5)
 
 data.frame(ea_conn_cont_LV1_pos_nets[order(ea_conn_cont_LV1_pos_nets$mean, decreasing = TRUE),])
 
@@ -1013,7 +945,7 @@ nets_neg_LV1 <- ggraph(tg_ea_conn_cont_LV1_neg_nets, layout="linear", circular=T
   #                show.legend=FALSE, family="mono") +
   scale_colour_manual(values=net_cols) +
   scale_edge_color_manual(values="#00BFC4") + # added because connections all positive
-  scale_edge_width_continuous(range = c(0,1), limits = c(0,.0025)) + # chnaged from .025
+  scale_edge_width_continuous(range = c(0,1), limits = c(0,.03)) +
   geom_edge_loop(aes(colour=val, width=mean, span=90, direction=360)) + #, alpha=.6
   ggtitle("Negative Loadings") + 
   theme_minimal() + 
@@ -1025,33 +957,44 @@ nets_neg_LV1 <- ggraph(tg_ea_conn_cont_LV1_neg_nets, layout="linear", circular=T
         axis.text.y = element_blank(),
         axis.title = element_blank()) 
 
-nets_neg_LV1 + geom_node_text(aes(label=name,colour=name), show.legend=F, nudge_x=nets_neg_LV1$data$x*.4, nudge_y=nets_neg_LV1$data$y*.2) 
+nets_neg_LV1 + geom_node_text(aes(label=net_names,colour=name,size=3.5), nudge_x=.12, nudge_y=-.14, show.legend=F) 
+# geom_node_text(aes(label=net_names,colour=name,size=5), show.legend=F, nudge_x=nets_neg_LV1$data$x*.4, nudge_y=nets_neg_LV1$data$y*.2) 
+
+#ggsave(filename="/projects/loliver/SPINS_PLS_Conn/reports/figures/EA_LD1_nets_neg.png", device = "png", height=6, width=7.5)
 
 data.frame(ea_conn_cont_LV1_neg_nets[order(ea_conn_cont_LV1_neg_nets$mean, decreasing = TRUE),])
 
 ```
 
-```{r, fig.height=5, fig.width=6}
-# heatmap mean nets pos loadings (contribution)
+```{r, fig.height=5, fig.width=6.5}
+# heatmap mean nets pos loadings (contribution) - I think these make the most sense to display (doesn't remove something just because non-sig)
 ggplot(ea_conn_cont_LV1_pos_nets, aes(x=from,y=to,fill=mean)) + 
-  geom_tile(color = "grey") +
-  geom_tile(data = ea_conn_cont_LV1_pos_nets[c(1,15,29,43,57,71,85,99,113,127,141,155,169),], fill = NA, color = "black", size = .25) +
-  scale_fill_gradient(high = "#2166ac", low = "white", limit = c(0,.25), name="") + 
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 10),
-        axis.text = element_text(size = 10, color=net_cols)) +
-  ggtitle("Mean Within and Between-Network Contributions") + ylab("") + xlab("")
+  geom_tile(color = "black") +
+  geom_tile(data = ea_conn_cont_LV1_pos_nets[c(1,15,29,43,57,71,85,99,113,127,141,155,169),], fill = NA, color = "black", size = .5) +
+  #scale_fill_gradient(high = "#2166ac", low = "white", limit = c(0,.3), name="") + 
+  scale_fill_continuous_sequential(palette = "Oslo", rev=F, begin=0, end=1, l1=100, name="Contribution") + #l1=100 = white
+  scale_x_discrete(labels=net_names) + scale_y_discrete(labels=net_names) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4, size = 12),
+        axis.text = element_text(size = 12, color=net_cols)) + ylab("") + xlab("")
+  #ggtitle("Mean Within and Between-Network Contributions") + ylab("") + xlab("")
 
+#ggsave(filename="/projects/loliver/SPINS_PLS_Conn/reports/figures/EA_LD1_reg_heat_nets_pos_mean.png", device = "png", height=5, width=6.5)
+
+options(scipen = 999) # added as neg legend was showing values in scientific notation
+
+# neg loadings
 ggplot(ea_conn_cont_LV1_neg_nets, aes(x=from,y=to,fill=mean)) + 
-  geom_tile(color = "grey") +
-  geom_tile(data = ea_conn_cont_LV1_pos_nets[c(1,15,29,43,57,71,85,99,113,127,141,155,169),], fill = NA, color = "black", size = .25) +
-  scale_fill_gradient(high = "#2166ac", low = "white", limit = c(0,.0025), name="") +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 10),
-        axis.text = element_text(size = 10, color=net_cols)) +
-  ggtitle("Mean Within and Between-Network Contributions") + ylab("") + xlab("")
+  geom_tile(color = "black") +
+  geom_tile(data = ea_conn_cont_LV1_neg_nets[c(1,15,29,43,57,71,85,99,113,127,141,155,169),], fill = NA, color = "black", size = .5) +
+  scale_fill_continuous_sequential(palette = "Oslo", rev=F, begin=0, end=0.3, l1=100, name="Contribution") +
+  scale_x_discrete(labels=net_names) + scale_y_discrete(labels=net_names) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4, size = 12),
+        axis.text = element_text(size = 12, color=net_cols)) + ylab("") + xlab("")
+  #ggtitle("Mean Within and Between-Network Contributions") + ylab("") + xlab("")
+
+#ggsave(filename="/projects/loliver/SPINS_PLS_Conn/reports/figures/EA_LD1_reg_heat_nets_neg_mean.png", device = "png", height=5, width=6.5)
 
 ```
-
-
 
 
 ```{r fig.height=6, fig.width=8}
@@ -1166,7 +1109,7 @@ library(ggraph)
 
 # multiply conn by absolute loading ($ci)
 ea_conn_cont_LV2_abs <- mean_ea_conn_df
-ea_conn_cont_LV2_abs[ea_conn_cont_LV2_abs$rois %in% names(which(ea_plsc_boot$bootRatiosSignificant.i[,2] == TRUE)), "r"] <- 10000*sign(ea_conn_cont_LV2_abs[ea_conn_cont_LV2_abs$rois %in% names(which(ea_plsc_boot$bootRatiosSignificant.i[,2] == TRUE)), "r"])*(ea_plsc$TExPosition.Data$ci[rownames(ea_plsc$TExPosition.Data$ci) %in% names(which(ea_plsc_boot$bootRatiosSignificant.i[,2] == TRUE)),2])/16
+ea_conn_cont_LV2_abs[ea_conn_cont_LV2_abs$rois %in% names(which(ea_plsc_boot$bootRatiosSignificant.i[,2] == TRUE)), "r"] <- 10000*sign(ea_conn_cont_LV2_abs[ea_conn_cont_LV2_abs$rois %in% names(which(ea_plsc_boot$bootRatiosSignificant.i[,2] == TRUE)), "r"])*(ea_plsc$TExPosition.Data$ci[rownames(ea_plsc$TExPosition.Data$ci) %in% names(which(ea_plsc_boot$bootRatiosSignificant.i[,2] == TRUE)),2])/15
 
 # make non-sig connections 0
 ea_conn_cont_LV2_abs[!(ea_conn_cont_LV2_abs$rois %in% names(which(ea_plsc_boot$bootRatiosSignificant.i[,2] == TRUE))), "r"] <- 0
@@ -1330,7 +1273,7 @@ nets_pos_LV2 <- ggraph(tg_ea_conn_cont_LV2_pos_nets, layout="linear", circular=T
         axis.text.y = element_blank(),
         axis.title = element_blank()) 
 
-nets_pos_LV2 + geom_node_text(aes(label=name,colour=name), show.legend=F, nudge_x=nets_pos_LV2$data$x*.4, nudge_y=nets_pos_LV2$data$y*.2) 
+nets_pos_LV2 + geom_node_text(aes(label=net_names,colour=name,size=3.5), nudge_x=.12, nudge_y=-.14, show.legend=F)
 
 data.frame(ea_conn_cont_LV2_pos_nets[order(ea_conn_cont_LV2_pos_nets$mean, decreasing = TRUE),])
 
@@ -1352,35 +1295,40 @@ nets_neg_LV2 <- ggraph(tg_ea_conn_cont_LV2_neg_nets, layout="linear", circular=T
         axis.text.y = element_blank(),
         axis.title = element_blank()) 
 
-nets_neg_LV2 + geom_node_text(aes(label=name,colour=name), show.legend=F, nudge_x=nets_neg_LV2$data$x*.4, nudge_y=nets_neg_LV2$data$y*.2) 
+nets_neg_LV2 + geom_node_text(aes(label=net_names,colour=name,size=3.5), nudge_x=.12, nudge_y=-.14, show.legend=F)
+# geom_node_text(aes(label=name,colour=name), show.legend=F, nudge_x=nets_neg_LV2$data$x*.4, nudge_y=nets_neg_LV2$data$y*.2) 
 
 data.frame(ea_conn_cont_LV2_neg_nets[order(ea_conn_cont_LV2_neg_nets$mean, decreasing = TRUE),])
 
 ```
 
-```{r, fig.height=5, fig.width=6}
+```{r, fig.height=5, fig.width=6.5}
 # heatmap mean nets pos loadings (contribution)
 ggplot(ea_conn_cont_LV2_pos_nets, aes(x=from,y=to,fill=mean)) + 
-  geom_tile(color = "grey") +
-  geom_tile(data = ea_conn_cont_LV2_pos_nets[c(1,15,29,43,57,71,85,99,113,127,141,155,169),], fill = NA, color = "black", size = .25) +
-  scale_fill_gradient(high = "#2166ac", low = "white", limit = c(0,.1), name="") + 
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 10),
-        axis.text = element_text(size = 10, color=net_cols)) +
-  ggtitle("Mean Within and Between-Network Contributions") + ylab("") + xlab("")
+  geom_tile(color = "black") +
+  geom_tile(data = ea_conn_cont_LV2_pos_nets[c(1,15,29,43,57,71,85,99,113,127,141,155,169),], fill = NA, color = "black", size = .5) +
+  scale_fill_continuous_sequential(palette = "Oslo", rev=F, begin=0, end=0.4, l1=100, name="Contribution") + #l1=100 = white
+  scale_x_discrete(labels=net_names) + scale_y_discrete(labels=net_names) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4, size = 12),
+        axis.text = element_text(size = 12, color=net_cols)) + ylab("") + xlab("")
+  #ggtitle("Mean Within and Between-Network Contributions") + ylab("") + xlab("")
+
+#ggsave(filename="/projects/loliver/SPINS_PLS_Conn/reports/figures/EA_LD2_reg_heat_nets_pos_mean.png", device = "png", height=5, width=6.5)
+
 
 # neg loadings
 ggplot(ea_conn_cont_LV2_neg_nets, aes(x=from,y=to,fill=mean)) + 
-  geom_tile(color = "grey") +
-  geom_tile(data = ea_conn_cont_LV2_pos_nets[c(1,15,29,43,57,71,85,99,113,127,141,155,169),], fill = NA, color = "black", size = .25) +
-  scale_fill_gradient(high = "#2166ac", low = "white", limit = c(0,.01), name="") +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 10),
-        axis.text = element_text(size = 10, color=net_cols)) +
-  ggtitle("Mean Within and Between-Network Contributions") + ylab("") + xlab("")
+  geom_tile(color = "black") +
+  geom_tile(data = ea_conn_cont_LV2_neg_nets[c(1,15,29,43,57,71,85,99,113,127,141,155,169),], fill = NA, color = "black", size = .5) +
+  scale_fill_continuous_sequential(palette = "Oslo", rev=F, begin=0, end=0.25, l1=100, name="Contribution") +
+  scale_x_discrete(labels=net_names) + scale_y_discrete(labels=net_names) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.4, size = 12),
+        axis.text = element_text(size = 12, color=net_cols)) + ylab("") + xlab("")
+  #ggtitle("Mean Within and Between-Network Contributions") + ylab("") + xlab("")
+
+#ggsave(filename="/projects/loliver/SPINS_PLS_Conn/reports/figures/EA_LD2_reg_heat_nets_neg_mean.png", device = "png", height=5, width=6.5)
 
 ```
-
-
-
 
 ```{r warning=FALSE}
 # PLSC by diagnostic group (results are the same as above, we will just examine them by group)
@@ -1656,14 +1604,11 @@ LV_demo <- data.frame(cbind(ea_plsc$TExPosition.Data$lx[,1],ea_plsc$TExPosition.
 
 colnames(LV_demo)[1:4] <- c("Lx_conn.1","Ly_beh.1","Lx_conn.2","Ly_beh.2")
 
-# add education info (highest grade) - nm this as clearly related to cognition
-#LV_demo <- merge(LV_demo,spins_behav[,c("record_id","demo_highest_grade_self")],by="record_id")
-
 # add ea mean FD data
 spins_fd <- read.csv(file="/projects/loliver/QC/spins_mean_fd_per_run.csv",stringsAsFactors=F,header=T)
 LV_demo <- merge(LV_demo,spins_fd[,c("record_id","fd_mean.task.emp_bold")],by="record_id")
 
-# correlations between scores and age and mean FD # NS p=1
+# correlations between scores and age and mean FD 
 rcorr(as.matrix(LV_demo[,c(2:5,8:9)])) 
 
 # t-tests for sex # all NS p=1
@@ -1682,58 +1627,42 @@ t.test(Ly_beh.2 ~ demo_sex, data=LV_demo, paired=F)
 ggplot(LV_demo, aes(x=Lx_conn.1, y=demo_age_study_entry, col=diagnostic_group)) + 
   geom_point() + 
   geom_smooth(method="lm", fill="grey40") + 
-  #labs(x ="Control A Stimulation", 
-  #     y = "3-Back Accuracy (d') Post") +
   theme_bw() 
 
 ggplot(LV_demo, aes(x=Ly_beh.1, y=demo_age_study_entry, col=diagnostic_group)) + 
   geom_point() + 
   geom_smooth(method="lm", fill="grey40") + 
-  #labs(x ="Control A Stimulation", 
-  #     y = "3-Back Accuracy (d') Post") +
   theme_bw() 
 
 ggplot(LV_demo, aes(x=Lx_conn.1, y=fd_mean.task.emp_bold, col=diagnostic_group)) + 
   geom_point() + 
   geom_smooth(method="lm", fill="grey40") + 
-  #labs(x ="Control A Stimulation", 
-  #     y = "3-Back Accuracy (d') Post") +
   theme_bw() 
 
 ggplot(LV_demo, aes(x=Ly_beh.1, y=fd_mean.task.emp_bold, col=diagnostic_group)) + 
   geom_point() + 
   geom_smooth(method="lm", fill="grey40") + 
-  #labs(x ="Control A Stimulation", 
-  #     y = "3-Back Accuracy (d') Post") +
   theme_bw() 
 
 # Dimension 2
 ggplot(LV_demo, aes(x=Lx_conn.2, y=demo_age_study_entry, col=diagnostic_group)) + 
   geom_point() + 
   geom_smooth(method="lm", fill="grey40") + 
-  #labs(x ="Control A Stimulation", 
-  #     y = "3-Back Accuracy (d') Post") +
   theme_bw() 
 
 ggplot(LV_demo, aes(x=Ly_beh.2, y=demo_age_study_entry, col=diagnostic_group)) + 
   geom_point() + 
   geom_smooth(method="lm", fill="grey40") + 
-  #labs(x ="Control A Stimulation", 
-  #     y = "3-Back Accuracy (d') Post") +
   theme_bw() 
   
 ggplot(LV_demo, aes(x=Lx_conn.2, y=fd_mean.task.emp_bold, col=diagnostic_group)) + 
   geom_point() + 
   geom_smooth(method="lm", fill="grey40") + 
-  #labs(x ="Control A Stimulation", 
-  #     y = "3-Back Accuracy (d') Post") +
   theme_bw() 
 
 ggplot(LV_demo, aes(x=Ly_beh.2, y=fd_mean.task.emp_bold, col=diagnostic_group)) + 
   geom_point() + 
   geom_smooth(method="lm", fill="grey40") + 
-  #labs(x ="Control A Stimulation", 
-  #     y = "3-Back Accuracy (d') Post") +
   theme_bw() 
   
 ```
@@ -1750,530 +1679,3 @@ rcorr(as.matrix(LV_demo[,c(2:5,10:13)]))
 
 ```
 
-
-```{r}
-# examine relationships between scores and clinical measures and functioning 
-# add scores to demo data
-LV_demo_clin <- merge(LV_demo, spins_behav_conn[spins_behav_conn$record_id %in% LV_demo$record_id, c("record_id","bprs_factor_total","sans_total_sc","qls_total","bsfs_total")], by="record_id")
-
-# add CPZE data 
-spins_cpze <- read.csv(file="/projects/loliver/SPINS/data/final_cpzeqv.csv",stringsAsFactors=F,header=T)
-LV_demo_clin <- merge(LV_demo_clin, spins_cpze[spins_cpze$record_id %in% LV_demo_clin$record_id,c("record_id","cpz_eq_total")], by="record_id",all=TRUE)
-
-# look for NAs in SSDs only # N=19 missing CPZEs; N=1 missing QLS total
-LV_demo_clin_SSD <- LV_demo_clin[LV_demo_clin$diagnostic_group=="case",]
-LV_demo_clin_SSD[!complete.cases(LV_demo_clin_SSD),] 
-
-# identify any patients missing from spins_cpze # N=19 - look into this
-LV_demo_clin[!(LV_demo_clin$record_id %in% spins_cpze$record_id) & LV_demo_clin$diagnostic_group=="case",]
-
-# correlations between dim scores and BPRS total, SANS total, QLS total, BSFS total, and CPZE
-rcorr(as.matrix(LV_demo_clin[,c(2:5,10:14)]))
-
-p.adjust(c(.0044,.0000), method = "fdr", n = 2) # dim 1 cpze only for now
-p.adjust(c(.735,.884), method = "fdr", n = 2) # dim 2 cpze only for now
-
-```
-
-```{r}
-# visualize associations
-
-# Dimension 1
-ggplot(LV_demo_clin, aes(x=Lx_conn.1, y=cpz_eq_total)) + 
-  geom_point() + 
-  geom_smooth(method="lm", fill="grey40") + 
-  #labs(x ="Control A Stimulation", 
-  #     y = "3-Back Accuracy (d') Post") +
-  theme_bw() 
-
-ggplot(LV_demo_clin, aes(x=Ly_beh.1, y=cpz_eq_total)) + 
-  geom_point() + 
-  geom_smooth(method="lm", fill="grey40") + 
-  theme_bw() 
-
-ggplot(LV_demo_clin, aes(x=Lx_conn.1, y=bsfs_total)) + 
-  geom_point() + 
-  geom_smooth(method="lm", fill="grey40") + 
-  theme_bw() 
-
-ggplot(LV_demo_clin, aes(x=Ly_beh.1, y=bsfs_total)) + 
-  geom_point() + 
-  geom_smooth(method="lm", fill="grey40") + 
-  theme_bw() 
-
-ggplot(LV_demo_clin, aes(x=Ly_beh.1, y=sans_total_sc)) + 
-  geom_point() + 
-  geom_smooth(method="lm", fill="grey40") + 
-  theme_bw() 
-
-ggplot(LV_demo_clin, aes(x=Lx_conn.1, y=sans_total_sc)) + 
-  geom_point() + 
-  geom_smooth(method="lm", fill="grey40") + 
-  theme_bw() 
-
-# Dimension 2
-ggplot(LV_demo_clin, aes(x=Lx_conn.2, y=cpz_eq_total)) + 
-  geom_point() + 
-  geom_smooth(method="lm", fill="grey40") + 
-  theme_bw() 
-
-ggplot(LV_demo_clin, aes(x=Ly_beh.2, y=cpz_eq_total)) + 
-  geom_point() + 
-  geom_smooth(method="lm", fill="grey40") + 
-  theme_bw() 
-
-ggplot(LV_demo_clin, aes(x=Lx_conn.2, y=bsfs_total, col=diagnostic_group)) + 
-  geom_point() + 
-  geom_smooth(method="lm", fill="grey40") + 
-  theme_bw() 
-
-ggplot(LV_demo_clin, aes(x=Ly_beh.2, y=bsfs_total, col=diagnostic_group)) + 
-  geom_point() + 
-  geom_smooth(method="lm", fill="grey40") + 
-  theme_bw() 
-
-ggplot(LV_demo_clin, aes(x=Lx_conn.2, y=sans_total_sc)) + 
-  geom_point() + 
-  geom_smooth(method="lm", fill="grey40") + 
-  theme_bw() 
-
-ggplot(LV_demo_clin, aes(x=Ly_beh.2, y=sans_total_sc)) + 
-  geom_point() + 
-  geom_smooth(method="lm", fill="grey40") + 
-  theme_bw() 
-
-```
-
-
-
-```{r warning=FALSE}
-# PLSC by sex # again, same as overall results
-ea_plsc_sex <- tepPLS(conn, beh, center1 = TRUE, scale1 = "SS1", center2 = TRUE, scale2 = "SS1", DESIGN=spins_behav_combat$demo_sex, graphs=FALSE)
-
-# permutation testing and scree plot to determine number of components
-set.seed(999)
-perm_ea_plsc_sex <- perm4PLSC(conn, beh, center1 = TRUE, scale1 = "SS1", center2 = TRUE, scale2 = "SS1", nIter = 1000) 
-
-ea_plsc_sex$TExPosition.Data$t # to get variance explained
-perm_ea_plsc_sex$pEigenvalues # to get LV p values
-
-```
-
-```{r warning=FALSE}
-# plot scores 
-LV1_sex <- cbind(ea_plsc_sex$TExPosition.Data$lx[,1],ea_plsc_sex$TExPosition.Data$ly[,1])
-colnames(LV1_sex) <- c("Lx_conn 1", "Ly_beh 1")
-rownames(LV1_sex) <- spins_behav_combat$demo_sex
-
-# compute LV1 group means 
-LV1_sex_mean <- getMeans(LV1_sex, spins_behav_combat$demo_sex)
-
-# colours by group means
-gr_colours <- dplyr::recode(rownames(LV1_sex),
-                       'female' = '#F8766D',
-                       'male' = '#00BFC4')
-
-gr_mean_colours <- dplyr::recode(rownames(LV1_sex_mean),
-                       'female' = '#F8766D',
-                       'male' = '#00BFC4')
-
-# get bootstrap intervals of groups
-set.seed(999)
-ea_LV1_sex_mean_boot <- Boot4Mean(LV1_sex, spins_behav_combat$demo_sex)
-
-# add colnames to iterations (they are in an array, so not sure how to do this atm)? 
-#for (i in names(ea_LV1_sex_mean_boot$BootCube)) {
-#  colnames(ea_LV1_sex_mean_boot$BootCube[[i]]) <- colnames(LV1_sex)
-#}
-
-#apply(ea_LV1_sex_mean_boot$BootCube, 3, setNames, nm=colnames(LV1_sex))
-
-```
-
-```{r warning=FALSE}
-# plot LV1_sex
-plot_LV1_sex <- createFactorMap(LV1_sex,
-                         col.points = gr_colours,
-                         col.labels = gr_colours,
-                         alpha.points = 0.2)
-
-plot_LV1_sex_mean <- createFactorMap(LV1_sex_mean,
-                              col.points = gr_mean_colours,
-                              col.labels = gr_mean_colours,
-                              cex = 4,
-                              pch = 17,
-                              alpha.points = 0.8)
-
-plot_LV1_sex_meanCI <- MakeCIEllipses(ea_LV1_sex_mean_boot$BootCube[,c(1:2),], # get the first two components
-                              col = gr_mean_colours)
-                              
-                         
-cor.test(LV1_sex[rownames(LV1_sex)=="female","Lx_conn 1"],LV1_sex[rownames(LV1_sex)=="female","Ly_beh 1"]) # female r=.457, p<.0001
-cor.test(LV1_sex[rownames(LV1_sex)=="male","Lx_conn 1"],LV1_sex[rownames(LV1_sex)=="male","Ly_beh 1"]) # male r=.413, p<.0001
-
-plot1_LV1_sex <- plot_LV1_sex$zeMap_background + 
-  plot_LV1_sex$zeMap_dots + 
-  plot_LV1_sex_mean$zeMap_dots + 
-  plot_LV1_sex_mean$zeMap_text +
-  #plot_LV1_sex_meanCI +
-  coord_cartesian() +
-  ggtitle("Latent Variable 1: Factor Scores by Sex at Birth") +
-         labs(y = "LV 1 Y Behaviour Scores", x = "LV 1 X Connectivity Scores")
-
-print(plot1_LV1_sex)
-
-```
-
-```{r fig.height=4, fig.width=8}
-# t-tests by sex for conn scores
-LV1_sex_demo <- data.frame(cbind(LV1_sex,spins_behav_combat[,c("record_id","diagnostic_group","demo_sex","demo_age_study_entry")]))
-
-t.test(Lx_conn.1 ~ demo_sex, data=LV1_sex_demo, paired=F) # NS
-
-# plot scores by group
-ggplot(LV1_sex_demo, aes(x= demo_sex, y = Lx_conn.1, col = demo_sex)) +
-  geom_boxplot() + labs(y = "LV1 Connectivity Scores", x="female                     male") + 
-  scale_x_discrete(breaks=NULL) +
-  geom_jitter(shape=16, position=position_jitterdodge()) +
-  #scale_fill_manual(values = c("blue","red")) +
-  #facet_wrap(~valence,scales='free') +
-  theme_bw() +
-     theme(panel.grid.minor.x = element_blank(), panel.grid.major.x = element_blank())
-
-ggplot(LV1_sex_demo, aes(x= demo_sex, y = Lx_conn.1, fill = demo_sex)) + 
-     geom_boxplot(outlier.shape = NA, alpha = 0.0001) + 
-     geom_dotplot(binaxis = 'y', stackdir = 'center') +
-     geom_hline(yintercept = 0) +
-     labs( x=NULL,      
-           y = bquote('LV1 Connectivity Scores'),
-           fill = "Sex at Birth") +
-     scale_fill_manual(values = c("blue","red")) +
-#    facet_wrap(~Region) + could use for densities
-     theme_bw() +
-     theme(panel.grid.minor.x = element_blank(), panel.grid.major.x = element_blank())
-
-```
-
-```{r fig.height=4, fig.width=8}
-# t-tests by sex for beh scores
-t.test(Ly_beh.1 ~ demo_sex, data=LV1_sex_demo, paired=F)
-
-# plot scores by group
-ggplot(LV1_sex_demo, aes(x= demo_sex, y = Ly_beh.1, col = demo_sex)) +
-  geom_boxplot() + labs(y = "LV1 Behaviour Scores", x="female                       male") +
-  scale_x_discrete(breaks=NULL) +
-  geom_jitter(shape=16, position=position_jitterdodge()) +
-  #scale_fill_manual(values = c("blue","red")) +
-  #facet_wrap(~valence,scales='free') +
-  theme_bw() +
-     theme(panel.grid.minor.x = element_blank(), panel.grid.major.x = element_blank())
-
-```
-
-```{r warning=FALSE}
-# plot LV2 scores 
-LV2_sex <- cbind(ea_plsc_sex$TExPosition.Data$lx[,2],ea_plsc_sex$TExPosition.Data$ly[,2])
-colnames(LV2_sex) <- c("Lx_conn 2", "Ly_beh 2")
-rownames(LV2_sex) <- spins_behav_combat$demo_sex
-
-# compute LV2 group means 
-LV2_sex_mean <- getMeans(LV2_sex, spins_behav_combat$demo_sex)
-
-# colours by group means
-gr_colours <- dplyr::recode(rownames(LV2_sex),
-                       'female' = '#F8766D',
-                       'male' = '#00BFC4')
-
-gr_mean_colours <- dplyr::recode(rownames(LV2_sex_mean),
-                       'female' = '#F8766D',
-                       'male' = '#00BFC4')
-
-# get bootstrap intervals of groups
-set.seed(999)
-ea_LV2_sex_mean_boot <- Boot4Mean(LV2_sex, spins_behav_combat$demo_sex)
-
-```
-
-```{r warning=FALSE}
-# plot LV2_sex
-plot_LV2_sex <- createFactorMap(LV2_sex,
-                         col.points = gr_colours,
-                         col.labels = gr_colours,
-                         alpha.points = 0.2)
-
-plot_LV2_sex_mean <- createFactorMap(LV2_sex_mean,
-                              col.points = gr_mean_colours,
-                              col.labels = gr_mean_colours,
-                              cex = 4,
-                              pch = 17,
-                              alpha.points = 0.8)
-
-plot_LV2_sex_meanCI <- MakeCIEllipses(ea_LV2_sex_mean_boot$BootCube[,c(1:2),], # get the first two components
-                              col = gr_mean_colours)
-                              
-                         
-cor.test(LV2_sex[rownames(LV2_sex)=="female","Lx_conn 2"],LV2_sex[rownames(LV2_sex)=="female","Ly_beh 2"]) # female r=.318, p=.00016
-cor.test(LV2_sex[rownames(LV2_sex)=="male","Lx_conn 2"],LV2_sex[rownames(LV2_sex)=="male","Ly_beh 2"]) # male r=.270, p<.0001
-  
-plot1_LV2_sex <- plot_LV2_sex$zeMap_background + 
-  plot_LV2_sex$zeMap_dots + 
-  plot_LV2_sex_mean$zeMap_dots + 
-  plot_LV2_sex_mean$zeMap_text +
-  #plot_LV2_sex_meanCI +
-  coord_cartesian() +
-  ggtitle("Latent 2: Observations Factor Scores by Sex at Birth") +
-         labs(y = "Latent 2 - y ", x = "Latent 2 - x")
-
-print(plot1_LV2_sex)
-
-```
-
-```{r fig.height=4, fig.width=8}
-# t-tests by diagnostic group for conn scores
-LV2_sex_demo <- data.frame(cbind(LV2_sex,spins_behav_combat[,c("record_id","diagnostic_group","demo_sex","demo_age_study_entry")]))
-
-t.test(Lx_conn.2 ~ demo_sex, data=LV2_sex_demo, paired=F)
-
-# plot scores by group
-ggplot(LV2_sex_demo, aes( x= demo_sex, y = Lx_conn.2, col = demo_sex)) +
-  geom_boxplot() + labs(y = "LV2 Connectivity Scores", x="female                          male") + 
-  scale_x_discrete(breaks=NULL) +
-  geom_jitter(shape=16, position=position_jitterdodge()) +
-  #scale_fill_manual(values = c("blue","red")) +
-  #facet_wrap(~valence,scales='free') +
-  theme_bw() +
-     theme(panel.grid.minor.x = element_blank(), panel.grid.major.x = element_blank())
-
-```
-
-```{r fig.height=4, fig.width=8}
-# t-tests by diagnostic group for beh scores
-t.test(Ly_beh.2 ~ demo_sex, data=LV2_sex_demo, paired=F)
-
-# plot scores by group
-ggplot(LV2_sex_demo, aes( x= demo_sex, y = Ly_beh.2, col = demo_sex)) +
-  geom_boxplot() + labs(y = "LV2 Behaviour Scores", x="female                            male") + 
-  scale_x_discrete(breaks=NULL) +
-  geom_jitter(shape=16, position=position_jitterdodge()) +
-  #scale_fill_manual(values = c("blue","red")) +
-  #facet_wrap(~valence,scales='free') +
-  theme_bw() +
-     theme(panel.grid.minor.x = element_blank(), panel.grid.major.x = element_blank())
-
-```
-
-
-
-
-
-
-
-
-
-
-
-
-```{r warning=FALSE}
-# salience plots and bootstrapping for contributor significance
-
-# contributions are absolute values, so need to get signs based on factor scores
-Cx_conn_gr <- ea_plsc_gr$TExPosition.Data$ci * sign(ea_plsc_gr$TExPosition.Data$fi)
-Cy_beh_gr <- ea_plsc_gr$TExPosition.Data$cj * sign(ea_plsc_gr$TExPosition.Data$fj)
-
-# bootstrapped model 
-set.seed(999)
-ea_plsc_boot_gr <- Boot4PLSC(conn, beh, center1 = TRUE, scale1 = "SS1", center2 = TRUE, scale2 = "SS1", nIter = 1000,
-  critical.value = 2, nf2keep = 3, alphaLevel = 0.05) 
-
-```
-
-```{r fig.height=6, fig.width=6}
-# salience plots by group - UPDATE
-# sig conn for LV1
-names(which(ea_plsc_boot$bootRatiosSignificant.i[,1] == TRUE))
-
-#LV1_Conn <- PrettyBarPlot2(bootratio = round(100000*Cx_conn[,1]), 
-#            threshold = 100/nrow(Cx_conn),
-#            signifOnly = TRUE,
-#            plotnames = TRUE,
-#            main = "Conn Factor Loadings LV1",
-#            ylab = "Variable Factor Loadings")
-
-# sig conn for LV2
-names(which(ea_plsc_boot$bootRatiosSignificant.i[,2] == TRUE)) 
-
-#LV2_Conn <- PrettyBarPlot2(bootratio = round(100*Cx_conn[,2]), 
-#            plotnames = TRUE,
-#            signifOnly = TRUE,
-#            main = "Conn Factor Loadings LV2",
-#            ylab = "Variable Factor Loadings")
-
-
-# sig beh for LV1
-names(which(ea_plsc_boot$bootRatiosSignificant.j[,1] == TRUE))
-
-PrettyBarPlot2(bootratio = round(100*Cy_beh[,1]),
-            threshold = 1.5,
-            plotnames = TRUE,
-            font.shrink = 0,
-            font.size = 7,
-            main = "Beh Factor Loadings LV1",
-            ylab = "Variable Factor Loadings") +
-            theme(axis.text.y = element_text(size=16))
-
-# sig beh for LV2
-names(which(ea_plsc_boot$bootRatiosSignificant.j[,2] == TRUE))
-
-PrettyBarPlot2(bootratio = round(100*Cy_beh[,2]),
-            threshold = 9,
-            plotnames = TRUE,
-            font.shrink = 0,
-            font.size = 7,
-            main = "Beh Factor Loadings LV2",
-            ylab = "Variable Factor Loadings") +
-            theme(axis.text.y = element_text(size=16))
-
-
-```
-
-
-```{r}
-# PLSC with only soc cog beh variables
-
-# create separate X and Y matrices 
-sc_conn <- conn # x var
-sc_beh <- beh[,1:9] # y var
-
-
-# yeo johnson family transform beh variables - decide whether we want to do this (and do above as well if so) - skip for now
-get_pT_yj <- function(x) {
-  pT <- x^powerTransform(x,family="yjPower")$lambda
-  return(pT)
-}
-
-sc_beh <- apply(sc_beh,2,get_pT_yj)
-
-
-# examine covariance - maybe after so we can focus on most relevant variables
-
-# run pls including centering and scaling, per behavioural PLS in MATLAB - centered and normalized with sum of squares of each column equal to 1
-ea_sc_plsc <- tepPLS(sc_conn, sc_beh, center1 = TRUE, scale1 = "SS1", center2 = TRUE, scale2 = "SS1", DESIGN=NULL, graphs=FALSE)
-
-# permutation testing and scree plot to determine number of components
-set.seed(999)
-perm_ea_sc_plsc <- perm4PLSC(sc_conn, sc_beh, center1 = TRUE, scale1 = "SS1", center2 = TRUE, scale2 = "SS1", nIter = 500) 
-
-#plot scree
-PlotScree(ev = ea_sc_plsc$TExPosition.Data$eigs, p.ev = perm_ea_sc_plsc$pEigenvalues, plotKaiser = TRUE, col.ns = "black",
-          col.sig = "red")
-
-# plot scores 
-sc_LV1 <- cbind(ea_sc_plsc$TExPosition.Data$lx[,1],ea_sc_plsc$TExPosition.Data$ly[,1])
-colnames(sc_LV1) <- c("Lx_conn 1", "Ly_beh 1")
-plot_sc_LV1 <- createFactorMap(sc_LV1) 
-
-cor(ea_sc_plsc$TExPosition.Data$lx[,1],ea_sc_plsc$TExPosition.Data$ly[,1])
-plot_sc_LV1$zeMap_background + plot_sc_LV1$zeMap_dots + coord_cartesian() 
-
-
-sc_LV2 <- cbind(ea_sc_plsc$TExPosition.Data$lx[,2],ea_sc_plsc$TExPosition.Data$ly[,2])
-colnames(sc_LV2) <- c("Lx_conn 2", "Ly_beh 2")
-plot_sc_LV2 <- createFactorMap(sc_LV2, constraints = NULL)
-
-cor(ea_sc_plsc$TExPosition.Data$lx[,2],ea_sc_plsc$TExPosition.Data$ly[,2])
-plot_sc_LV2$zeMap_background + plot_sc_LV2$zeMap_dots + coord_cartesian() 
-
-
-# salience plots and bootstrapping for contributor significance
-# contributions/saliences (loadings) are absolute values, so need to get signs based on factor scores
-Cx_sc_conn <- ea_sc_plsc$TExPosition.Data$ci * sign(ea_sc_plsc$TExPosition.Data$fi)
-Cy_sc_beh <- ea_sc_plsc$TExPosition.Data$cj * sign(ea_sc_plsc$TExPosition.Data$fj)
-
-# bootstrapped model
-ea_sc_plsc_boot <- Boot4PLSC(sc_conn, sc_beh, center1 = TRUE, scale1 = "SS1", center2 = TRUE, scale2 = "SS1", nIter = 1000,
-  critical.value = 2, nf2keep = 3, alphaLevel = 0.05)
-
-```
-
-```{r}
-# salience plots
-# sig conn for LV1
-names(which(ea_sc_plsc_boot$bootRatiosSignificant.i[,1] == TRUE))
-
-#LV1_sc_Conn <- PrettyBarPlot2(bootratio = round(100*Cx_sc_conn[,1]), 
-#            threshold = 100/nrow(Cx_sc_conn),
-#            #signifOnly = TRUE,
-#            plotnames = TRUE,
-#            main = "Conn Factor Loadings LV1",
-#            ylab = "Variable Factor Loadings")
-
-# sig conn for LV2
-names(which(ea_sc_plsc_boot$bootRatiosSignificant.i[,2] == TRUE))
-
-#LV2_sc_Conn <- PrettyBarPlot2(bootratio = round(100*Cx_sc_conn[,2]), 
-#            plotnames = TRUE,
-#            signifOnly = TRUE,
-#            main = "Conn Factor Loadings LV2",
-#            ylab = "Variable Factor Loadings")
-
-
-# sig beh for LV1
-names(which(ea_sc_plsc_boot$bootRatiosSignificant.j[,1] == TRUE))
-
-PrettyBarPlot2(bootratio = round(100*Cy_sc_beh[,1]), 
-            plotnames = TRUE,
-            main = "Beh Factor Loadings LV1",
-            ylab = "Variable Factor Loadings")
-
-# sig beh for LV2
-names(which(ea_sc_plsc_boot$bootRatiosSignificant.j[,2] == TRUE))
-
-PrettyBarPlot2(bootratio = round(100*Cy_sc_beh[,2]), 
-            plotnames = TRUE,
-            main = "Beh Factor Loadings LV2",
-            ylab = "Variable Factor Loadings")
-
-```
-
-
-```{r}
-
-```
-
-
-```{r}
-# visualize time series for EA in Glasser ROIs - can try later
-
-for (i in names(EA_resid_ts)) {
-  EA_resid_ts_melt[[i]]$TR <- 1:819 
-  EA_resid_ts_melt[[i]] <- melt(EA_resid_ts_melt[[i]],id="TR")
-}
-
-for (i in names(resid_times_rois_melt)) {
-  ggplot(data.frame(resid_times_rois_melt[[i]]), aes(x = Sub.brick, y = value, group = 1)) + geom_line() + facet_wrap("variable") + ggtitle(i)
-}
-
-
-```
-
-```{r}
-# visualize correlation matrix for each participant
-for (i in names(cor_EA_diag[1:50])) {
-  corrplot(cor_EA[[i]], method="color",type="lower",tl.cex=.6,tl.col="black",title=i)
-}
-
-corrplot(cor_EA[["SPN01_CMH_0159"]], method="color",type="lower",tl.cex=.6,tl.col="black")
-corrplot(cor_EA[["SPN01_ZHP_0123"]], method="color",type="lower",tl.cex=.6,tl.col="black")
-```
-
-
-```{r}
-
-```
-
-
-Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
-
-When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
-
-The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
